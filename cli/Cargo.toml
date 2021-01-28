@@ -1,0 +1,16 @@
+[package]
+name = "lunatic-cli"
+version = "0.1.0"
+authors = ["KSean222 <44050761+KSean222@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }
+lunatic = { path = "../engine" }
+futures = "0.3.8"
+clap = "2.32"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
+serde_json = "1.0"

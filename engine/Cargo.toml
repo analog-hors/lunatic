@@ -1,0 +1,12 @@
+[package]
+name = "lunatic"
+version = "0.1.0"
+authors = ["KSean222 <44050761+KSean222@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }
+serde = { version = "1.0", features = ["derive"] }
+futures = "0.3.8"

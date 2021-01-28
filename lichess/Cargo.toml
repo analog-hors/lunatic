@@ -1,0 +1,17 @@
+[package]
+name = "lunatic-lichess"
+version = "0.1.0"
+authors = ["KSean222 <44050761+KSean222@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }
+lunatic = { path = "../engine" }
+reqwest = { version = "0.10.6", features = ["stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.8"
+tokio = { version = "0.2.21", features = ["macros"] }
+futures-util = "0.3.5"
