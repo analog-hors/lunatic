@@ -41,6 +41,7 @@ impl LunaticSearchState {
         
         //Chess branching factor is said to be ~35
         let mut mvv_lva_moves = Vec::with_capacity(40);
+        moves.set_iterator_mask(*board.combined());
         for mv in &mut moves {
             let victim = board
                 .piece_on(mv.get_dest())
@@ -50,6 +51,8 @@ impl LunaticSearchState {
                 .unwrap();
             mvv_lva_moves.push(((victim, attacker), mv));
         }
+        moves.set_iterator_mask(!EMPTY);
+        
         mvv_lva_moves.sort_unstable_by(|((v1, a1), _), ((v2, a2), _)| {
             //Most Valuable Victim, Least Valuable Aggressor
             v1.cmp(v2).then(a2.cmp(a1)).reverse()
