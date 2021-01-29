@@ -75,10 +75,10 @@ fn main() {
     let mut is_turn = matches.value_of("color").unwrap() == "white";
     let ndjson = matches.occurrences_of("ndjson") > 0;
     
-    let mut board = chess::Board::default();
+    let mut board = Board::default();
     let engine = LunaticContext::new(settings.engine_settings);
     loop {
-        if is_turn {
+        let mv = if is_turn {
             engine.begin_think(board);
             std::thread::sleep(Duration::from_secs(settings.think_time));
             if let Some((mv, info)) = futures::executor::block_on(engine.end_think()).unwrap() {
@@ -90,6 +90,7 @@ fn main() {
                     println!("Depth: {}", info.depth);
                     println!("{}", mv);
                 }
+                mv
             } else {
                 return
             }
@@ -97,12 +98,13 @@ fn main() {
             let mut input = String::new();
             std::io::stdin().read_line(&mut input).unwrap();
             let input = input.trim();
-            board = board.make_move_new(parse_move(if ndjson {
+            parse_move(if ndjson {
                 serde_json::from_str(input).unwrap()
             } else {
                 input
-            }));
-        }
+            })
+        };
+        board = board.make_move_new(mv);
         is_turn = !is_turn;
     }
 }
