@@ -65,7 +65,7 @@ impl Default for StandardEvaluator {
                 [-40, -20,   0,   5,   5,   0, -20, -40],
                 [-50, -40, -30, -30, -30, -30, -40, -50]
             ]),
-            bishop: 3300,
+            bishop: 330,
             bishop_table: PieceSquareTable([
                 [-20, -10, -10, -10, -10, -10, -10, -20],
                 [-10,   0,   0,   0,   0,   0,   0, -10],
