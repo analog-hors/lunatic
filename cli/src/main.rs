@@ -8,12 +8,13 @@ use lunatic::evaluation::StandardEvaluator;
 use clap::{Arg, App};
 use serde::{Serialize, Deserialize};
 
-const SETTINGS: &str = "lunatic_cli_settings.json";
+const SETTINGS: &str = "lunatic_cli_settings.yml";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct Settings {
     think_time: u64,
+    max_depth: u8,
     engine_settings: LunaticContextSettings<StandardEvaluator>
 }
 
@@ -21,6 +22,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             think_time: 10,
+            max_depth: 5,
             engine_settings: LunaticContextSettings::default()
         }
     }
@@ -96,7 +98,7 @@ fn main() {
     let engine = LunaticContext::new(settings.engine_settings);
     loop {
         let mv = if board.side_to_move() == engine_color {
-            engine.begin_think(board);
+            engine.begin_think(board, settings.max_depth);
             std::thread::sleep(Duration::from_secs(settings.think_time));
             if let Some((mv, info)) = futures::executor::block_on(engine.end_think()).unwrap() {
                 if ndjson {

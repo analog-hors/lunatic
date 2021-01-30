@@ -2,6 +2,10 @@
 
 members = [
     "engine",
+    "uci",
     "cli",
     "lichess"
 ]
+
+[patch.crates-io]
+chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }

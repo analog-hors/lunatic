@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }
+chess = "3.1"
 lunatic = { path = "../engine" }
 futures = "0.3.8"
 clap = "2.32"

@@ -1,5 +1,5 @@
 [package]
-name = "lunatic"
+name = "lunatic-uci"
 version = "0.1.0"
 authors = ["analog-hors <44050761+analog-hors@users.noreply.github.com>"]
 edition = "2018"
@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 chess = "3.1"
-serde = { version = "1.0", features = ["derive"] }
+lunatic = { path = "../engine" }
+vampirc-uci = { version = "0.11", features = ["chess"] }
 futures = "0.3.8"

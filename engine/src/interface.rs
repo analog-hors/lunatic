@@ -9,21 +9,22 @@ use crate::engine::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LunaticContextSettings<E> {
-    pub max_depth: u8,
     pub evaluator: E
 }
 
 impl<E: Default> Default for LunaticContextSettings<E> {
     fn default() -> Self {
         Self {
-            max_depth: 64,
             evaluator: E::default()
         }
     }
 }
 
 enum LunaticContextCommand {
-    BeginThink(Board),
+    BeginThink {
+        board: Board,
+        max_depth: u8
+    },
     EndThink(oneshot::Sender<Option<(ChessMove, MoveInfo)>>)
 }
 
@@ -44,12 +45,12 @@ impl LunaticContext {
         let (thinker, thinker_recv) = mpsc::channel();
         std::thread::spawn(move || {
             while let Ok(command) = thinker_recv.recv() {
-                if let LunaticContextCommand::BeginThink(board) = command {
+                if let LunaticContextCommand::BeginThink { board, max_depth } = command {
                     let mut search = LunaticSearchState::new();
                     let mut mv = None;
                     let mut depth = 0;
                     loop {
-                        let command = if depth as u8 > settings.max_depth {
+                        let command = if depth as u8 > max_depth {
                             if let Ok(recv) = thinker_recv.recv() {
                                 recv
                             } else {
@@ -87,8 +88,11 @@ impl LunaticContext {
         }
     }
 
-    pub fn begin_think(&self, board: Board) {
-        self.thinker.send(LunaticContextCommand::BeginThink(board)).unwrap();
+    pub fn begin_think(&self, board: Board, max_depth: u8) {
+        self.thinker.send(LunaticContextCommand::BeginThink {
+            board,
+            max_depth
+        }).unwrap();
     }
     
     pub fn end_think(&self) -> impl Future<Output=Result<Option<(ChessMove, MoveInfo)>, oneshot::Canceled>>  {

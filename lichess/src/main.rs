@@ -19,6 +19,7 @@ const SETTINGS: &str = "lunatic_lichess_settings.yml";
 struct Settings {
     api: String,
     think_time: u64,
+    max_depth: u8,
     engine_settings: LunaticContextSettings<StandardEvaluator>,
     // opening_book: Option<String>
 }
@@ -28,6 +29,7 @@ impl Default for Settings {
         Self {
             api: "https://lichess.org".to_owned(),
             think_time: 10,
+            max_depth: 64,
             engine_settings: LunaticContextSettings::default(),
             // opening_book: None
         }
@@ -96,7 +98,7 @@ impl ChessSession {
     }
     async fn next_move(&mut self) {
         println!("Thinking. . .");
-        self.engine.begin_think(self.board);
+        self.engine.begin_think(self.board, self.settings.max_depth);
         tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
         let (mv, info) = self.engine.end_think().await.unwrap().unwrap();
         println!("Value: {}", info.value);
