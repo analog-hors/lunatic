@@ -36,6 +36,16 @@ fn main() {
             .takes_value(true)
             .required(true)
             .possible_values(&["white", "black"]))
+        .arg(Arg::with_name("board")
+            .short("b")
+            .value_name("FEN STRING")
+            .help("Initial FEN string")
+            .takes_value(true)
+            .validator(|s| {
+                s.parse::<Board>()
+                    .map(|_| ())
+                    .map_err(|e| format!("{}", e))
+            }))
         .arg(Arg::with_name("ndjson")
             .long("ndjson")
             .help("Switches to NDJSON communication (Meant for programmatic use)"))
@@ -72,13 +82,20 @@ fn main() {
         }
     };
 
-    let mut is_turn = matches.value_of("color").unwrap() == "white";
+    let engine_color = if matches.value_of("color").unwrap() == "white" {
+        Color::White
+    } else {
+        Color::Black
+    };
     let ndjson = matches.occurrences_of("ndjson") > 0;
+    let mut board = matches
+        .value_of("board")
+        .map(|s| s.parse::<Board>().unwrap())
+        .unwrap_or_default();
     
-    let mut board = Board::default();
     let engine = LunaticContext::new(settings.engine_settings);
     loop {
-        let mv = if is_turn {
+        let mv = if board.side_to_move() == engine_color {
             engine.begin_think(board);
             std::thread::sleep(Duration::from_secs(settings.think_time));
             if let Some((mv, info)) = futures::executor::block_on(engine.end_think()).unwrap() {
@@ -105,7 +122,6 @@ fn main() {
             })
         };
         board = board.make_move_new(mv);
-        is_turn = !is_turn;
     }
 }
 
