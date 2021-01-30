@@ -45,11 +45,19 @@ impl TranspositionTable {
         depth: u8
     ) {
         let hash = board.get_hash();
-        self.0[hash as usize & TABLE_INDEX_MASK] = Some(TableEntry {
+        let entry = TableEntry {
             hash,
             kind,
             value,
             depth
-        });
+        };
+        let old = &mut self.0[hash as usize & TABLE_INDEX_MASK];
+        if let Some(old) = old {
+            if old.depth < entry.depth {
+                *old = entry;
+            }
+        } else {
+            *old = Some(entry);
+        }
     }
 }

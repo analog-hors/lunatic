@@ -68,7 +68,7 @@ impl LunaticSearchState {
         &mut self,
         evaluator: &impl Evaluator,
         board: &Board,
-        depth: u8
+        max_depth: u8
     ) -> Option<(ChessMove, SearchInfo)> {
         let mut nodes = 1;
         let mut best_move = None;
@@ -79,7 +79,8 @@ impl LunaticSearchState {
                 evaluator,
                 &child_board,
                 &mut nodes,
-                depth,
+                0,
+                max_depth,
                 -i32::MAX,
                 -best_value
             );
@@ -103,6 +104,7 @@ impl LunaticSearchState {
         board: &Board,
         node_count: &mut u32,
         depth: u8,
+        max_depth: u8,
         mut alpha: i32,
         mut beta: i32
     ) -> i32 {
@@ -110,7 +112,7 @@ impl LunaticSearchState {
         
         *node_count += 1;
         if let Some(entry) = self.transposition_table.get(&board) {
-            if entry.depth >= depth {
+            if entry.depth < depth {
                 match entry.kind {
                     TableEntryKind::Exact => return entry.value,
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
@@ -121,8 +123,8 @@ impl LunaticSearchState {
                 }
             }
         }
-        if depth == 0 || board.status() != BoardStatus::Ongoing {
-            evaluator.evaluate(board)
+        if depth >= max_depth || board.status() != BoardStatus::Ongoing {
+            evaluator.evaluate(board, depth)
         } else {
             let mut value = -i32::MAX;
             for mv in self.get_moves(board) {
@@ -131,7 +133,8 @@ impl LunaticSearchState {
                     evaluator,
                     &child_board,
                     node_count,
-                    depth - 1,
+                    depth + 1,
+                    max_depth,
                     -beta,
                     -alpha
                 );

@@ -37,9 +37,7 @@ pub struct StandardEvaluator {
     pub rook: i32,
     pub rook_table: PieceSquareTable,
     pub queen: i32,
-    pub queen_table: PieceSquareTable,
-    pub checkmate: i32,
-    pub stalemate: i32
+    pub queen_table: PieceSquareTable
 }
 
 impl Default for StandardEvaluator {
@@ -99,31 +97,27 @@ impl Default for StandardEvaluator {
                 [-10,   5,   5,   5,   5,   5,   0, -10],
                 [-10,   0,   5,   0,   0,   0,   0, -10],
                 [-20, -10, -10,  -5,  -5, -10, -10, -20]
-            ]),
-            checkmate: i32::MAX,
-            stalemate: 0
+            ])
         }
     }
 }
 
 impl Evaluator for StandardEvaluator {
-    fn evaluate(&self, board: &chess::Board) -> i32 {
-        let side_multiplier = if board.side_to_move() == Color::White {
-            1
-        } else {
-            -1
-        };
-        let evaluation = match board.status() {
+    fn evaluate(&self, board: &chess::Board, depth: u8) -> i32 {
+        match board.status() {
             BoardStatus::Ongoing => {
                 let white = self.evaluate_for_side(board, chess::Color::White);
                 let black = self.evaluate_for_side(board, chess::Color::Black);
-                white - black
+                if board.side_to_move() == Color::White {
+                    white - black
+                } else {
+                    black - white
+                }
             },
-            // If it's checkmate/stalemate and it's a player's turn, they've actually lost/tied, not won.
-            BoardStatus::Checkmate => -self.checkmate,
-            BoardStatus::Stalemate => -self.stalemate
-        };
-        side_multiplier * evaluation
+            //Checkmate decays so that shorter mate sequences are valued over longer ones
+            BoardStatus::Checkmate => -(i32::MAX - depth as i32),
+            BoardStatus::Stalemate => 0
+        }
     }
 }
 
