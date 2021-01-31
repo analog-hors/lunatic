@@ -37,7 +37,9 @@ pub struct StandardEvaluator {
     pub rook: i32,
     pub rook_table: PieceSquareTable,
     pub queen: i32,
-    pub queen_table: PieceSquareTable
+    pub queen_table: PieceSquareTable,
+    pub king_table: PieceSquareTable,
+    pub king_table_endgame: PieceSquareTable
 }
 
 impl Default for StandardEvaluator {
@@ -97,17 +99,38 @@ impl Default for StandardEvaluator {
                 [-10,   5,   5,   5,   5,   5,   0, -10],
                 [-10,   0,   5,   0,   0,   0,   0, -10],
                 [-20, -10, -10,  -5,  -5, -10, -10, -20]
+            ]),
+            king_table: PieceSquareTable([
+                [-30, -40, -40, -50, -50, -40, -40, -30],
+                [-30, -40, -40, -50, -50, -40, -40, -30],
+                [-30, -40, -40, -50, -50, -40, -40, -30],
+                [-30, -40, -40, -50, -50, -40, -40, -30],
+                [-20, -30, -30, -40, -40, -30, -30, -20],
+                [-10, -20, -20, -20, -20, -20, -20, -10],
+                [ 20,  20,   0,   0,   0,   0,  20,  20],
+                [ 20,  30,  10,   0,   0,  10,  30,  20]
+            ]),
+            king_table_endgame: PieceSquareTable([
+                [-50, -40, -30, -20, -20, -30, -40, -50],
+                [-30, -20, -10,   0,   0, -10, -20, -30],
+                [-30, -10,  20,  30,  30,  20, -10, -30],
+                [-30, -10,  30,  40,  40,  30, -10, -30],
+                [-30, -10,  30,  40,  40,  30, -10, -30],
+                [-30, -10,  20,  30,  30,  20, -10, -30],
+                [-30, -30,   0,   0,   0,   0, -30, -30],
+                [-50, -30, -30, -30, -30, -30, -30, -50]
             ])
         }
     }
 }
 
 impl Evaluator for StandardEvaluator {
-    fn evaluate(&self, board: &chess::Board, depth: u8) -> i32 {
+    fn evaluate(&self, board: &Board, depth: u8) -> i32 {
         match board.status() {
             BoardStatus::Ongoing => {
-                let white = self.evaluate_for_side(board, chess::Color::White);
-                let black = self.evaluate_for_side(board, chess::Color::Black);
+                let phase = Self::game_phase(&board);
+                let white = self.evaluate_for_side(board, chess::Color::White, phase);
+                let black = self.evaluate_for_side(board, chess::Color::Black, phase);
                 if board.side_to_move() == Color::White {
                     white - black
                 } else {
@@ -122,18 +145,30 @@ impl Evaluator for StandardEvaluator {
 }
 
 impl StandardEvaluator {
-    fn evaluate_for_side(&self, board: &chess::Board, side: chess::Color) -> i32 {
+    const MAX_PHASE: u32 = 256;
+
+    fn game_phase(board: &Board) -> u32 {
+        macro_rules! game_phase_fn {
+            ($($piece:ident=$weight:expr,$count:expr;)*) => {
+                const INIT_PHASE: u32 = ($($count * $weight + )* 0) * 2;
+                let phase = INIT_PHASE $( - board.pieces(Piece::$piece).popcnt() * $weight)*;
+                (phase * Self::MAX_PHASE + (INIT_PHASE / 2)) / INIT_PHASE
+            }
+        }
+        game_phase_fn! {
+            Pawn   = 0, 8;
+            Knight = 1, 2;
+            Bishop = 1, 2;
+            Rook   = 2, 2;
+            Queen  = 4, 1;
+        }
+    }
+
+    fn evaluate_for_side(&self, board: &Board, side: Color, phase: u32) -> i32 {
         let mut value = 0;
         let ally_pieces = *board.color_combined(side);
 
-        const PIECES: &[Piece] = &[
-            Piece::Pawn,
-            Piece::Knight,
-            Piece::Bishop,
-            Piece::Rook,
-            Piece::Queen
-        ];
-        for &piece in PIECES {
+        for &piece in &ALL_PIECES {
             let pieces = ally_pieces & *board.pieces(piece);
             for square in pieces {
                 value += match piece {
@@ -142,7 +177,13 @@ impl StandardEvaluator {
                     Piece::Bishop => self.bishop + self.bishop_table.get(side, square),
                     Piece::Rook => self.rook + self.rook_table.get(side, square),
                     Piece::Queen => self.queen + self.queen_table.get(side, square),
-                    _ => unreachable!()
+                    Piece::King => {
+                        let init = self.king_table.get(side, square);
+                        let endgame = self.king_table_endgame.get(side, square);
+                        let phase = phase as i32;
+                        const MAX_PHASE: i32 = StandardEvaluator::MAX_PHASE as i32;
+                        ((init * (MAX_PHASE - phase)) + (endgame * phase)) / MAX_PHASE
+                    }
                 };
             }
         }
