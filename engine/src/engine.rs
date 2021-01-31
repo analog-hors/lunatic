@@ -14,6 +14,13 @@ pub struct LunaticSearchState {
     transposition_table: TranspositionTable
 }
 
+pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
+    // The only capturing move that doesn't move to the captured piece's square
+    // is en passant, which is a pawn move and zeroes anyway
+    board.piece_on(mv.get_source()) == Some(Piece::Pawn) ||
+    board.piece_on(mv.get_dest()).is_some()
+}
+
 impl LunaticSearchState {
     pub fn new() -> Self {
         Self {
@@ -68,6 +75,9 @@ impl LunaticSearchState {
         &mut self,
         evaluator: &impl Evaluator,
         board: &Board,
+        game_history: &mut Vec<u64>,
+        // Zeroing means a move that resets the 50 move rule counter and represents an irreversible move.
+        depth_since_zeroing: u8,
         max_depth: u8
     ) -> Option<(ChessMove, SearchInfo)> {
         let mut nodes = 1;
@@ -75,21 +85,27 @@ impl LunaticSearchState {
         let mut best_value = -i32::MAX;
         for mv in self.get_moves(board) {
             let child_board = board.make_move_new(mv);
+            let depth_since_zeroing = if move_zeroes(mv, board) {
+                1
+            } else {
+                depth_since_zeroing + 1
+            };
+            game_history.push(child_board.get_hash());
             let value = -self.evaluate_position(
                 evaluator,
                 &child_board,
+                game_history,
                 &mut nodes,
                 0,
+                depth_since_zeroing,
                 max_depth,
                 -i32::MAX,
                 -best_value
             );
+            game_history.pop();
             if best_move.is_none() || value > best_value {
                 best_move = Some(mv);
                 best_value = value;
-            }
-            if best_value >= i32::MAX {
-                break;
             }
         }
         best_move.map(|mv| (mv, SearchInfo {
@@ -102,12 +118,33 @@ impl LunaticSearchState {
         &mut self,
         evaluator: &impl Evaluator,
         board: &Board,
+        game_history: &mut Vec<u64>,
         node_count: &mut u32,
         depth: u8,
+        depth_since_zeroing: u8,
         max_depth: u8,
         mut alpha: i32,
         mut beta: i32
     ) -> i32 {
+        //Fifty move rule
+        if depth_since_zeroing >= 100 {
+            return 0;
+        }
+
+        //Threefold repetition
+        if depth_since_zeroing >= 6 {
+            let repetitions = game_history
+                .iter()
+                .rev()
+                .take(depth_since_zeroing as usize)
+                .step_by(2) // Every second ply so it's our turn
+                .filter(|&&hash| hash == board.get_hash())
+                .count();
+            if repetitions >= 3 {
+                return 0;
+            }
+        }
+
         let original_alpha = alpha;
         
         *node_count += 1;
@@ -129,15 +166,24 @@ impl LunaticSearchState {
             let mut value = -i32::MAX;
             for mv in self.get_moves(board) {
                 let child_board = board.make_move_new(mv);
+                let depth_since_zeroing = if move_zeroes(mv, board) {
+                    1
+                } else {
+                    depth_since_zeroing + 1
+                };
+                game_history.push(child_board.get_hash());
                 let child_value = -self.evaluate_position(
                     evaluator,
                     &child_board,
+                    game_history,
                     node_count,
                     depth + 1,
+                    depth_since_zeroing,
                     max_depth,
                     -beta,
                     -alpha
                 );
+                game_history.pop();
                 value = value.max(child_value);
                 alpha = alpha.max(value);
                 if alpha >= beta {

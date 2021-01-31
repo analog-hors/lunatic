@@ -14,8 +14,8 @@ struct EngineSearch {
 }
 
 impl EngineSearch {
-    fn start(engine: &LunaticContext, board: Board, max_depth: u8, think_time: Duration) -> Self {
-        engine.begin_think(board, max_depth);
+    fn start(engine: &LunaticContext, initial_pos: Board, moves: Vec<ChessMove>, max_depth: u8, think_time: Duration) -> Self {
+        engine.begin_think(initial_pos, moves, max_depth);
         Self {
             start: Instant::now(),
             think_time
@@ -46,7 +46,7 @@ fn send_message(message: UciMessage) {
 }
 
 fn main() {
-    let mut board = Board::default();
+    let mut position = None;
     let settings = LunaticContextSettings::<StandardEvaluator>::default();
     let engine = LunaticContext::new(settings);
     let mut search = None;
@@ -73,12 +73,10 @@ fn main() {
                 UciMessage::UciNewGame => {}
     
                 UciMessage::Position { fen, moves, .. } => {
-                    board = fen
+                    let board = fen
                         .map(|fen| fen.as_str().parse().unwrap())
                         .unwrap_or_default();
-                    for mv in moves {
-                        board = board.make_move_new(mv);
-                    }
+                    position = Some((board, moves));
                 }
                 UciMessage::Go { time_control, search_control } => {
                     let mut think_time = Duration::seconds(5);
@@ -95,9 +93,11 @@ fn main() {
                         }
                         //TODO implement the rest
                     }
+                    let (initial_pos, moves) = position.take().unwrap();
                     search = Some(EngineSearch::start(
                         &engine,
-                        board,
+                        initial_pos,
+                        moves,
                         max_depth,
                         think_time
                     ));

@@ -1,77 +1,100 @@
 use std::str::FromStr;
 
-use serde::{Serialize, Deserialize};
+use chess::*;
+use serde::{Deserialize, Deserializer};
 
-#[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Deserialize)]
+pub struct Profile {
+    pub id: Option<String>
+}
+
+#[derive(Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub enum GameStatus {
-    created,
-    started,
-    aborted,
-    mate,
-    resign,
-    stalemate,
-    timeout,
-    draw,
-    outOfTime,
-    cheat,
-    noStart,
-    unknownFinish,
-    variantEnd
+    Created,
+    Started,
+    Aborted,
+    Mate,
+    Resign,
+    Stalemate,
+    Timeout,
+    Draw,
+    OutOfTime,
+    Cheat,
+    NoStart,
+    UnknownFinish,
+    VariantEnd
 }
 
 impl GameStatus {
     pub fn ended(self) -> bool {
-        self != GameStatus::created && self != GameStatus::started
+        self != GameStatus::Created && self != GameStatus::Started
     }
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize)]
-pub enum GameWinner {
-    black,
-    white
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ChessSide {
+    White,
+    Black
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
 pub enum GameMessage {
-    gameFull {
+    GameFull {
         state: GameState,
+        #[serde(rename = "initialFen")]
+        #[serde(deserialize_with = "deserialize_board")]
+        initial_fen: Board,
+        white: Profile,
+        black: Profile
     },
-    gameState {
-        moves: String,
+    GameState {
+        #[serde(deserialize_with = "deserialize_moves")]
+        moves: Vec<ChessMove>,
         status: GameStatus,
-        winner: Option<GameWinner>
+        winner: Option<ChessSide>
     },
-    chatLine {
+    ChatLine {
         
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct GameState {
-    pub moves: String,
+    #[serde(deserialize_with = "deserialize_moves")]
+    pub moves: Vec<ChessMove>,
     pub status: GameStatus,
-    pub winner: Option<GameWinner>
+    pub winner: Option<ChessSide>
 }
 
-pub fn parse_move(mv: &str) -> chess::ChessMove {
-    let source = chess::Square::from_str(&mv[0..2]).unwrap();
-    let dest = chess::Square::from_str(&mv[2..4]).unwrap();
+fn deserialize_board<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Board, D::Error> {
+    let board: &str = Deserialize::deserialize(deserializer)?;
+    Ok(board.parse().unwrap_or_default())
+}
+
+fn deserialize_moves<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<ChessMove>, D::Error> {
+    let moves: &str = Deserialize::deserialize(deserializer)?;
+    Ok(moves.split(' ').filter(|s| s.len() > 0).map(parse_move).collect())
+}
+
+fn parse_move(mv: &str) -> ChessMove {
+    let source = Square::from_str(&mv[0..2]).unwrap();
+    let dest = Square::from_str(&mv[2..4]).unwrap();
     
     let promo = if mv.len() == 5 {
         Some(match mv.chars().last().unwrap() {
-            'q' => chess::Piece::Queen,
-            'r' => chess::Piece::Rook,
-            'n' => chess::Piece::Knight,
-            'b' => chess::Piece::Bishop,
+            'q' => Piece::Queen,
+            'r' => Piece::Rook,
+            'n' => Piece::Knight,
+            'b' => Piece::Bishop,
             _ => panic!("Invalid promotion."),
         })
     } else {
         None
     };
 
-    chess::ChessMove::new(source, dest, promo)
+    ChessMove::new(source, dest, promo)
 }

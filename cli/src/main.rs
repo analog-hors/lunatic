@@ -94,11 +94,12 @@ fn main() {
         .value_of("board")
         .map(|s| s.parse::<Board>().unwrap())
         .unwrap_or_default();
+    let mut moves = Vec::new();
     
     let engine = LunaticContext::new(settings.engine_settings);
     loop {
         let mv = if board.side_to_move() == engine_color {
-            engine.begin_think(board, settings.max_depth);
+            engine.begin_think(board, moves.clone(), settings.max_depth);
             std::thread::sleep(Duration::from_secs(settings.think_time));
             if let Some((mv, info)) = futures::executor::block_on(engine.end_think()).unwrap() {
                 if ndjson {
@@ -123,6 +124,7 @@ fn main() {
                 input
             })
         };
+        moves.push(mv);
         board = board.make_move_new(mv);
     }
 }

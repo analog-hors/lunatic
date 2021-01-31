@@ -22,7 +22,8 @@ impl<E: Default> Default for LunaticContextSettings<E> {
 
 enum LunaticContextCommand {
     BeginThink {
-        board: Board,
+        initial_pos: Board,
+        moves: Vec<ChessMove>,
         max_depth: u8
     },
     EndThink(oneshot::Sender<Option<(ChessMove, MoveInfo)>>)
@@ -45,7 +46,19 @@ impl LunaticContext {
         let (thinker, thinker_recv) = mpsc::channel();
         std::thread::spawn(move || {
             while let Ok(command) = thinker_recv.recv() {
-                if let LunaticContextCommand::BeginThink { board, max_depth } = command {
+                if let LunaticContextCommand::BeginThink { initial_pos, moves, max_depth } = command {
+                    let mut game_history = Vec::with_capacity(100);
+                    let mut board = initial_pos;
+                    game_history.push(board.get_hash());
+                    for mv in moves {
+                        if crate::engine::move_zeroes(mv, &board) {
+                            game_history.clear();
+                        }
+                        board = board.make_move_new(mv);
+                        game_history.push(board.get_hash());
+                    }
+                    let depth_since_zeroing = game_history.len() as u8;
+                    
                     let mut search = LunaticSearchState::new();
                     let mut mv = None;
                     let mut depth = 0;
@@ -60,6 +73,8 @@ impl LunaticContext {
                             mv = search.best_move(
                                 &settings.evaluator,
                                 &board,
+                                &mut game_history,
+                                depth_since_zeroing,
                                 depth as u8
                             );
                             depth += 1;
@@ -88,9 +103,10 @@ impl LunaticContext {
         }
     }
 
-    pub fn begin_think(&self, board: Board, max_depth: u8) {
+    pub fn begin_think(&self, initial_pos: Board, moves: Vec<ChessMove>, max_depth: u8) {
         self.thinker.send(LunaticContextCommand::BeginThink {
-            board,
+            initial_pos,
+            moves,
             max_depth
         }).unwrap();
     }

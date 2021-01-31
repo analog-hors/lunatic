@@ -5,6 +5,8 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 use futures_util::StreamExt;
 
+use chess::*;
+
 use lunatic::evaluation::StandardEvaluator;
 use lunatic::*;
 
@@ -40,24 +42,33 @@ struct ChessSession {
     game_id: String,
     token: String,
     settings: Settings,
-    board: chess::Board,
     engine: LunaticContext,
     client: reqwest::Client,
 }
 
 impl ChessSession {
     async fn run(&mut self) {
+        let profile = self.client
+            .get(&format!("{}/api/account", self.settings.api))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let profile: Profile = serde_json::from_str(&profile).unwrap();
+
         let mut stream = self.client
             .get(&format!("{}/api/bot/game/stream/{}", self.settings.api, self.game_id))
             .bearer_auth(&self.token)
-            .timeout(Duration::from_secs(60 * 60))
             .send()
             .await
             .unwrap()
             .bytes_stream();
-            
-        let mut skip_next = false;
-
+        
+        let mut position = Board::default();
+        let mut color = ChessSide::White;
         let mut buffer = String::new();
         while let Some(Ok(bytes)) = stream.next().await {
             for byte in bytes {
@@ -65,29 +76,31 @@ impl ChessSession {
                     if buffer.is_empty() {
                         continue;
                     }
-                    match serde_json::from_str(&buffer).unwrap() {
-                        GameMessage::gameFull { state } => {
-                            if state.status.ended() {
-                                return;
-                            }
-                            for mv in state.moves.split_ascii_whitespace() {
-                                self.board = self.board.make_move_new(parse_move(mv));
-                            }
-                            self.next_move().await;
-                            skip_next = true;
+                    let state = match serde_json::from_str(&buffer).unwrap() {
+                        GameMessage::GameFull { state, initial_fen, white, .. } => {
+                            position = initial_fen;
+                            color = if profile.id == white.id {
+                                ChessSide::White
+                            } else {
+                                ChessSide::Black
+                            };
+                            Some((state.moves, state.status))
                         },
-                        GameMessage::gameState { moves, status, .. } => {
-                            if status.ended() {
-                                return;
-                            }
-                            if !skip_next {
-                                let mv = parse_move(moves.split_ascii_whitespace().last().unwrap());
-                                self.board = self.board.make_move_new(mv);
-                                self.next_move().await;
-                            }
-                            skip_next = !skip_next;
-                        },
-                        _ => {}
+                        GameMessage::GameState { moves, status, .. } => Some((moves, status)),
+                        _ => None
+                    };
+                    if let Some((moves, status)) = state {
+                        if status.ended() {
+                            return;
+                        }
+                        let turn = if moves.len() % 2 == 0 {
+                            ChessSide::White
+                        } else {
+                            ChessSide::Black
+                        };
+                        if turn == color {
+                            self.make_move(position, moves).await;
+                        }
                     }
                     buffer.clear();
                 } else {
@@ -96,18 +109,19 @@ impl ChessSession {
             }
         }
     }
-    async fn next_move(&mut self) {
+
+    async fn make_move(&mut self, initial_pos: Board, moves: Vec<ChessMove>) {
         println!("Thinking. . .");
-        self.engine.begin_think(self.board, self.settings.max_depth);
+        self.engine.begin_think(initial_pos,  moves, self.settings.max_depth);
         tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
         let (mv, info) = self.engine.end_think().await.unwrap().unwrap();
         println!("Value: {}", info.value);
         println!("Nodes: {}", info.nodes);
         println!("Depth: {}", info.depth);
         println!("{}", mv);
-        self.board = self.board.make_move_new(mv);
         for _ in 0..10 {
-            let result = self.client.post(&format!("{}/api/bot/game/{}/move/{}", self.settings.api, self.game_id, mv))
+            let result = self.client
+                .post(&format!("{}/api/bot/game/{}/move/{}", self.settings.api, self.game_id, mv))
                 .bearer_auth(&self.token)
                 .send()
                 .await;
@@ -164,7 +178,6 @@ async fn main() {
             return;
         }
     };
-    let board = chess::Board::default();
     // let options = settings.engine_options.clone();
     // let opening_book = if let Some(path) = &settings.opening_book {
     //     match File::open(path) {
@@ -185,7 +198,6 @@ async fn main() {
         game_id,
         token,
         settings,
-        board,
         engine,
         client,
     }.run().await;
