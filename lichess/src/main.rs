@@ -2,10 +2,13 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::time::Duration;
 
+use rand::prelude::*;
+use rand::distributions::WeightedIndex;
 use serde::{Serialize, Deserialize};
 use futures_util::StreamExt;
-
 use chess::*;
+
+use chess_polyglot_reader::{PolyglotReader, PolyglotKey};
 
 use lunatic::evaluation::StandardEvaluator;
 use lunatic::*;
@@ -23,7 +26,8 @@ struct Settings {
     think_time: u64,
     max_depth: u8,
     engine_settings: LunaticContextSettings<StandardEvaluator>,
-    // opening_book: Option<String>
+    opening_book: Option<String>,
+    opening_book_weight_multiplier: u16
 }
 
 impl Default for Settings {
@@ -33,7 +37,8 @@ impl Default for Settings {
             think_time: 10,
             max_depth: 64,
             engine_settings: LunaticContextSettings::default(),
-            // opening_book: None
+            opening_book: None,
+            opening_book_weight_multiplier: 1
         }
     }
 }
@@ -44,6 +49,12 @@ struct ChessSession {
     settings: Settings,
     engine: LunaticContext,
     client: reqwest::Client,
+    opening_book: Option<PolyglotReader<File>>
+}
+
+enum ClientMoveInfo {
+    Engine(MoveInfo),
+    Book(u16)
 }
 
 impl ChessSession {
@@ -112,13 +123,57 @@ impl ChessSession {
 
     async fn make_move(&mut self, initial_pos: Board, moves: Vec<ChessMove>) {
         println!("Thinking. . .");
-        self.engine.begin_think(initial_pos,  moves, self.settings.max_depth);
-        tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
-        let (mv, info) = self.engine.end_think().await.unwrap().unwrap();
-        println!("Value: {}", info.value);
-        println!("Nodes: {}", info.nodes);
-        println!("Depth: {}", info.depth);
+        let mut mv = None;
+        if let Some(book) = &mut self.opening_book {
+            let mut board = initial_pos;
+            for &mv in &moves {
+                board = board.make_move_new(mv);
+            }
+            let key = PolyglotKey::from_board(&board);
+            let entries = book.get(&key).unwrap();
+            let weights = entries
+                .iter()
+                .map(|e| e.weight * self.settings.opening_book_weight_multiplier);
+            if let Ok(weights) = WeightedIndex::new(weights) {
+                let mut entry = entries[weights.sample(&mut thread_rng())];
+                if entry.mv.source.file == 4 && entry.mv.source.rank == entry.mv.dest.rank {
+                    let is_castle = match (entry.mv.dest.file, entry.mv.dest.rank) {
+                        (7, 0) => key.white_castle.king_side,
+                        (0, 0) => key.white_castle.queen_side,
+                        (7, 7) => key.black_castle.king_side,
+                        (0, 7) => key.black_castle.queen_side,
+                        _ => false
+                    };
+                    if is_castle {
+                        if entry.mv.dest.file < entry.mv.source.file {
+                            entry.mv.dest.file += 1;
+                        } else {
+                            entry.mv.dest.file -= 1;
+                        }
+                    }
+                }
+                mv = Some((entry.mv.into(), ClientMoveInfo::Book(entry.weight)));
+            }
+        }
+        if mv.is_none() {
+            self.engine.begin_think(initial_pos,  moves, self.settings.max_depth);
+            tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
+            let (engine_mv, info) = self.engine.end_think().await.unwrap().unwrap();
+            mv = Some((engine_mv, ClientMoveInfo::Engine(info)));
+        }
+        let (mv, info) = mv.unwrap();
         println!("{}", mv);
+        match info {
+            ClientMoveInfo::Engine(info) => {
+                println!("Value: {}", info.value);
+                println!("Nodes: {}", info.nodes);
+                println!("Depth: {}", info.depth);
+            }
+            ClientMoveInfo::Book(weight) => {
+                println!("Picked book move.");
+                println!("Weight: {}", weight);
+            }
+        }
         for _ in 0..10 {
             let result = self.client
                 .post(&format!("{}/api/bot/game/{}/move/{}", self.settings.api, self.game_id, mv))
@@ -178,27 +233,31 @@ async fn main() {
             return;
         }
     };
-    // let options = settings.engine_options.clone();
-    // let opening_book = if let Some(path) = &settings.opening_book {
-    //     match File::open(path) {
-    //         Ok(book) => Some(book),
-    //         Err(err) => {
-    //             eprintln!("Failed to read opening book {}: {}", path, err);
-    //             return;
-    //         }
-    //     }
-    // } else {
-    //     None
-    // };
-    // let engine = WaterBearInterface::new(board, evaluator, opening_book, options);
+    let opening_book = if let Some(path) = &settings.opening_book {
+        match File::open(path) {
+            Ok(book) => match PolyglotReader::new(book) {
+                Ok(book) => Some(book),
+                Err(err) => {
+                    eprintln!("Failed to load opening book {}: {}", path, err);
+                    return;
+                }
+            },
+            Err(err) => {
+                eprintln!("Failed to read opening book {}: {}", path, err);
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let engine = LunaticContext::new(settings.engine_settings.clone());
     let client = reqwest::Client::new();
-    
     ChessSession {
         game_id,
         token,
         settings,
         engine,
         client,
+        opening_book,
     }.run().await;
 }
