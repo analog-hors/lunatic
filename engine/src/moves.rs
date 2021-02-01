@@ -49,9 +49,10 @@ impl Ord for MvvLvaMove {
     }
 }
 
-pub fn get_moves(table: &TranspositionTable, board: &Board) -> impl Iterator<Item=ChessMove> {
+pub fn get_moves(table: &TranspositionTable, mut killer_move: Option<ChessMove>, board: &Board) -> impl Iterator<Item=ChessMove> {
     let mut pv_move = None;
     let mut pv_value = 0;
+    let mut killer_move_legal = false;
     for mv in MoveGen::new_legal(board) {
         let board = board.make_move_new(mv);
         if let Some(entry) = table.get(&board) {
@@ -60,10 +61,19 @@ pub fn get_moves(table: &TranspositionTable, board: &Board) -> impl Iterator<Ite
                 pv_value = entry.value;
             }
         }
+        if Some(mv) == killer_move {
+            killer_move_legal = true;
+        }
+    }
+    if !killer_move_legal {
+        killer_move = None;
     }
     
     let mut moves = MoveGen::new_legal(board);
     if let Some(mv) = pv_move {
+        moves.remove_move(mv);
+    }
+    if let Some(mv) = killer_move {
         moves.remove_move(mv);
     }
     
@@ -90,5 +100,6 @@ pub fn get_moves(table: &TranspositionTable, board: &Board) -> impl Iterator<Ite
     pv_move
         .into_iter()
         .chain(mvv_lva_moves)
+        .chain(killer_move)
         .chain(moves)
 }

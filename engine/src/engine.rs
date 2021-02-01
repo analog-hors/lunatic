@@ -10,6 +10,10 @@ pub struct SearchInfo {
     pub nodes: u32
 }
 
+pub struct NodeInfo {
+    killer_move: Option<ChessMove>
+}
+
 pub struct LunaticSearchState {
     transposition_table: TranspositionTable
 }
@@ -40,7 +44,8 @@ impl LunaticSearchState {
         let mut nodes = 1;
         let mut best_move = None;
         let mut best_value = -i32::MAX;
-        for mv in crate::moves::get_moves(&self.transposition_table, board) {
+        let mut killer_move = None;
+        for mv in crate::moves::get_moves(&self.transposition_table, killer_move, board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_zeroes(mv, board) {
                 1
@@ -48,10 +53,11 @@ impl LunaticSearchState {
                 depth_since_zeroing + 1
             };
             game_history.push(child_board.get_hash());
-            let value = -self.evaluate_position(
+            let (mut value, info) = self.evaluate_position(
                 evaluator,
                 &child_board,
                 game_history,
+                killer_move,
                 &mut nodes,
                 0,
                 depth_since_zeroing,
@@ -59,7 +65,11 @@ impl LunaticSearchState {
                 -i32::MAX,
                 -best_value
             );
+            value *= -1;
             game_history.pop();
+            if info.killer_move.is_some() {
+                killer_move = info.killer_move;
+            }
             if best_move.is_none() || value > best_value {
                 best_move = Some(mv);
                 best_value = value;
@@ -76,16 +86,21 @@ impl LunaticSearchState {
         evaluator: &impl Evaluator,
         board: &Board,
         game_history: &mut Vec<u64>,
+        killer_move: Option<ChessMove>,
         node_count: &mut u32,
         depth: u8,
         depth_since_zeroing: u8,
         max_depth: u8,
         mut alpha: i32,
         mut beta: i32
-    ) -> i32 {
+    ) -> (i32, NodeInfo) {
+        let mut info = NodeInfo {
+            killer_move: None
+        };
+
         //Fifty move rule
         if depth_since_zeroing >= 100 {
-            return 0;
+            return (0, info);
         }
 
         //Threefold repetition
@@ -98,7 +113,7 @@ impl LunaticSearchState {
                 .filter(|&&hash| hash == board.get_hash())
                 .count();
             if repetitions >= 3 {
-                return 0;
+                return (0, info);
             }
         }
 
@@ -108,20 +123,21 @@ impl LunaticSearchState {
         if let Some(entry) = self.transposition_table.get(&board) {
             if entry.depth < depth {
                 match entry.kind {
-                    TableEntryKind::Exact => return entry.value,
+                    TableEntryKind::Exact => return (entry.value, info),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
                     TableEntryKind::UpperBound => beta = beta.min(entry.value)
                 }
                 if alpha >= beta {
-                    return entry.value;
+                    return (entry.value, info);
                 }
             }
         }
         if depth >= max_depth || board.status() != BoardStatus::Ongoing {
-            evaluator.evaluate(board, depth)
+            (evaluator.evaluate(board, depth), info)
         } else {
             let mut value = -i32::MAX;
-            for mv in crate::moves::get_moves(&self.transposition_table, board) {
+            let mut child_killer_move = None;
+            for mv in crate::moves::get_moves(&self.transposition_table, killer_move, board) {
                 let child_board = board.make_move_new(mv);
                 let depth_since_zeroing = if move_zeroes(mv, board) {
                     1
@@ -129,10 +145,11 @@ impl LunaticSearchState {
                     depth_since_zeroing + 1
                 };
                 game_history.push(child_board.get_hash());
-                let child_value = -self.evaluate_position(
+                let (mut child_value, child_info) = self.evaluate_position(
                     evaluator,
                     &child_board,
                     game_history,
+                    child_killer_move,
                     node_count,
                     depth + 1,
                     depth_since_zeroing,
@@ -140,10 +157,15 @@ impl LunaticSearchState {
                     -beta,
                     -alpha
                 );
+                child_value *= -1;
                 game_history.pop();
+                if child_info.killer_move.is_some() {
+                    child_killer_move = child_info.killer_move;
+                }
                 value = value.max(child_value);
                 alpha = alpha.max(value);
                 if alpha >= beta {
+                    info.killer_move = Some(mv);
                     break;
                 }
             }
@@ -157,7 +179,7 @@ impl LunaticSearchState {
                 value,
                 depth
             );
-            value
+            (value, info)
         }
     }
 }
