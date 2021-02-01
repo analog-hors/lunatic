@@ -28,49 +28,6 @@ impl LunaticSearchState {
         }
     }
 
-    fn get_moves(&self, board: &Board) -> impl Iterator<Item=ChessMove> {
-        let mut pv_move = None;
-        let mut pv_value = 0;
-        for mv in MoveGen::new_legal(board) {
-            let board = board.make_move_new(mv);
-            if let Some(entry) = self.transposition_table.get(&board) {
-                if entry.kind == TableEntryKind::Exact && (pv_move.is_none() || entry.value > pv_value) {
-                    pv_move = Some(mv);
-                    pv_value = entry.value;
-                }
-            }
-        }
-        
-        let mut moves = MoveGen::new_legal(board);
-        if let Some(mv) = pv_move {
-            moves.remove_move(mv);
-        }
-        
-        //Chess branching factor is said to be ~35
-        let mut mvv_lva_moves = Vec::with_capacity(40);
-        moves.set_iterator_mask(*board.combined());
-        for mv in &mut moves {
-            let victim = board
-                .piece_on(mv.get_dest())
-                .unwrap_or(Piece::Pawn); // en passant
-            let attacker = board
-                .piece_on(mv.get_source())
-                .unwrap();
-            mvv_lva_moves.push(((victim, attacker), mv));
-        }
-        moves.set_iterator_mask(!EMPTY);
-        
-        mvv_lva_moves.sort_unstable_by(|((v1, a1), _), ((v2, a2), _)| {
-            //Most Valuable Victim, Least Valuable Aggressor
-            v1.cmp(v2).then(a2.cmp(a1)).reverse()
-        });
-        
-        pv_move
-            .into_iter()
-            .chain(mvv_lva_moves.into_iter().map(|(_, mv)| mv))
-            .chain(moves)
-    }
-
     pub fn best_move(
         &mut self,
         evaluator: &impl Evaluator,
@@ -83,7 +40,7 @@ impl LunaticSearchState {
         let mut nodes = 1;
         let mut best_move = None;
         let mut best_value = -i32::MAX;
-        for mv in self.get_moves(board) {
+        for mv in crate::moves::get_moves(&self.transposition_table, board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_zeroes(mv, board) {
                 1
@@ -164,7 +121,7 @@ impl LunaticSearchState {
             evaluator.evaluate(board, depth)
         } else {
             let mut value = -i32::MAX;
-            for mv in self.get_moves(board) {
+            for mv in crate::moves::get_moves(&self.transposition_table, board) {
                 let child_board = board.make_move_new(mv);
                 let depth_since_zeroing = if move_zeroes(mv, board) {
                     1

@@ -1,3 +1,4 @@
+mod moves;
 mod table;
 pub mod engine;
 pub mod evaluation;
