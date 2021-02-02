@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use std::time::Duration;
+use std::time::{Instant, Duration};
 
 use rand::prelude::*;
 use rand::distributions::WeightedIndex;
@@ -53,7 +53,7 @@ struct ChessSession {
 }
 
 enum ClientMoveInfo {
-    Engine(MoveInfo),
+    Engine(MoveInfo, Duration),
     Book(u16)
 }
 
@@ -156,15 +156,24 @@ impl ChessSession {
             }
         }
         if mv.is_none() {
+            let think_begin = Instant::now();
             self.engine.begin_think(initial_pos,  moves, self.settings.max_depth);
             tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
             let (engine_mv, info) = self.engine.end_think().await.unwrap().unwrap();
-            mv = Some((engine_mv, ClientMoveInfo::Engine(info)));
+            let think_time = think_begin.elapsed();
+            mv = Some((engine_mv, ClientMoveInfo::Engine(info, think_time)));
         }
         let (mv, info) = mv.unwrap();
         println!("{}", mv);
         match info {
-            ClientMoveInfo::Engine(info) => {
+            ClientMoveInfo::Engine(info, think_time) => {
+                let think_time = think_time.as_secs_f32();
+                println!(
+                    "Thought for {:.1} seconds (+{:.1} over target of {})",
+                    think_time,
+                    think_time - self.settings.think_time as f32,
+                    self.settings.think_time
+                );
                 println!("Value: {}", info.value);
                 println!("Nodes: {}", info.nodes);
                 println!("Depth: {}", info.depth);
