@@ -9,10 +9,10 @@ pub enum TableEntryKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct TableEntry {
-    hash: u64,
     pub kind: TableEntryKind,
     pub value: i32,
-    pub depth: u8
+    pub depth: u8,
+    pub best_move: ChessMove
 }
 
 const TABLE_SIZE_POW_TWO_INDEX: usize = 15;
@@ -20,7 +20,7 @@ pub const TABLE_SIZE: usize = 1 << TABLE_SIZE_POW_TWO_INDEX;
 const TABLE_INDEX_MASK: usize = TABLE_SIZE - 1;
 
 #[derive(Debug)]
-pub struct TranspositionTable([Option<TableEntry>; TABLE_SIZE]);
+pub struct TranspositionTable([Option<(u64, TableEntry)>; TABLE_SIZE]);
 
 impl TranspositionTable {
     pub fn new() -> Self {
@@ -29,8 +29,8 @@ impl TranspositionTable {
 
     pub fn get(&self, board: &Board) -> Option<TableEntry> {
         let hash = board.get_hash();
-        if let Some(entry) = self.0[hash as usize & TABLE_INDEX_MASK] {
-            if entry.hash == hash {
+        if let Some((entry_hash, entry)) = self.0[hash as usize & TABLE_INDEX_MASK] {
+            if entry_hash == hash {
                 return Some(entry);
             }
         }
@@ -40,24 +40,16 @@ impl TranspositionTable {
     pub fn set(
         &mut self,
         board: &Board,
-        kind: TableEntryKind,
-        value: i32,
-        depth: u8
+        entry: TableEntry
     ) {
         let hash = board.get_hash();
-        let entry = TableEntry {
-            hash,
-            kind,
-            value,
-            depth
-        };
         let old = &mut self.0[hash as usize & TABLE_INDEX_MASK];
         if let Some(old) = old {
-            if old.depth < entry.depth {
-                *old = entry;
+            if old.1.depth < entry.depth {
+                *old = (hash, entry);
             }
         } else {
-            *old = Some(entry);
+            *old = Some((hash, entry));
         }
     }
 }

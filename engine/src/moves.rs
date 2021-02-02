@@ -49,57 +49,72 @@ impl Ord for MvvLvaMove {
     }
 }
 
-pub fn get_moves(table: &TranspositionTable, mut killer_move: Option<ChessMove>, board: &Board) -> impl Iterator<Item=ChessMove> {
-    let mut pv_move = None;
-    let mut pv_value = 0;
-    let mut killer_move_legal = false;
-    for mv in MoveGen::new_legal(board) {
-        let board = board.make_move_new(mv);
-        if let Some(entry) = table.get(&board) {
-            if entry.kind == TableEntryKind::Exact && (pv_move.is_none() || entry.value > pv_value) {
-                pv_move = Some(mv);
-                pv_value = entry.value;
+pub struct SortedMoveGenerator {
+    board: Board,
+    pv_move: Option<ChessMove>,
+    captures: Option<MaxSelectionSorter<MvvLvaMove>>,
+    killer_move: Option<ChessMove>,
+    moves: MoveGen
+}
+
+impl Iterator for SortedMoveGenerator {
+    type Item = ChessMove;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(mv) = self.pv_move.take() {
+            self.moves.remove_move(mv);
+            return Some(mv);
+        }
+
+        if self.captures.is_none() {
+            let mut mvv_lva_moves = Vec::with_capacity(40);
+            self.moves.set_iterator_mask(*self.board.combined());
+            for mv in &mut self.moves {
+                if Some(mv) == self.killer_move {
+                    self.killer_move = None;
+                }
+                let victim = self.board
+                    .piece_on(mv.get_dest())
+                    .unwrap_or(Piece::Pawn); // en passant
+                let attacker = self.board
+                    .piece_on(mv.get_source())
+                    .unwrap();
+                mvv_lva_moves.push(MvvLvaMove {
+                    victim,
+                    attacker,
+                    mv
+                });
+            }
+            self.moves.set_iterator_mask(!EMPTY);
+            self.captures = Some(MaxSelectionSorter(mvv_lva_moves));
+        }
+        if let Some(mv) = self.captures.as_mut().unwrap().next() {
+            return Some(mv.mv);
+        }
+
+        if let Some(mv) = self.killer_move.take() {
+            let mut moves = MoveGen::new_legal(&self.board);
+            moves.set_iterator_mask(BitBoard::from_square(mv.get_dest()));
+            for mv in moves {
+                if mv.get_source() == mv.get_source() {
+                    return Some(mv);
+                }
             }
         }
-        if Some(mv) == killer_move {
-            killer_move_legal = true;
+
+        self.moves.next()
+    }
+}
+
+impl SortedMoveGenerator {
+    pub fn new(table: &TranspositionTable, killer_move: Option<ChessMove>, board: Board) -> Self {
+        let pv_move = table.get(&board).map(|entry| entry.best_move);
+        Self {
+            board,
+            pv_move,
+            captures: None,
+            killer_move,
+            moves: MoveGen::new_legal(&board)
         }
     }
-    if !killer_move_legal {
-        killer_move = None;
-    }
-    
-    let mut moves = MoveGen::new_legal(board);
-    if let Some(mv) = pv_move {
-        moves.remove_move(mv);
-    }
-    if let Some(mv) = killer_move {
-        moves.remove_move(mv);
-    }
-    
-    //Chess branching factor is said to be ~35
-    let mut mvv_lva_moves = Vec::with_capacity(40);
-    moves.set_iterator_mask(*board.combined());
-    for mv in &mut moves {
-        let victim = board
-            .piece_on(mv.get_dest())
-            .unwrap_or(Piece::Pawn); // en passant
-        let attacker = board
-            .piece_on(mv.get_source())
-            .unwrap();
-        mvv_lva_moves.push(MvvLvaMove {
-            victim,
-            attacker,
-            mv
-        });
-    }
-    moves.set_iterator_mask(!EMPTY);
-    let mvv_lva_moves = MaxSelectionSorter(mvv_lva_moves)
-        .map(|mv| mv.mv);
-    
-    pv_move
-        .into_iter()
-        .chain(mvv_lva_moves)
-        .chain(killer_move)
-        .chain(moves)
 }

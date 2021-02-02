@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::evaluation::Evaluator;
 use crate::table::*;
+use crate::moves::SortedMoveGenerator;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct SearchInfo {
@@ -45,7 +46,7 @@ impl LunaticSearchState {
         let mut best_move = None;
         let mut best_value = -i32::MAX;
         let mut killer_move = None;
-        for mv in crate::moves::get_moves(&self.transposition_table, killer_move, board) {
+        for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_zeroes(mv, board) {
                 1
@@ -136,8 +137,9 @@ impl LunaticSearchState {
             (evaluator.evaluate(board, depth), info)
         } else {
             let mut value = -i32::MAX;
+            let mut best_move = None;
             let mut child_killer_move = None;
-            for mv in crate::moves::get_moves(&self.transposition_table, killer_move, board) {
+            for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
                 let child_board = board.make_move_new(mv);
                 let depth_since_zeroing = if move_zeroes(mv, board) {
                     1
@@ -162,7 +164,10 @@ impl LunaticSearchState {
                 if child_info.killer_move.is_some() {
                     child_killer_move = child_info.killer_move;
                 }
-                value = value.max(child_value);
+                if child_value > value {
+                    value = child_value;
+                    best_move = Some(mv);
+                }
                 alpha = alpha.max(value);
                 if alpha >= beta {
                     info.killer_move = Some(mv);
@@ -171,13 +176,16 @@ impl LunaticSearchState {
             }
             self.transposition_table.set(
                 &board,
-                match value {
-                    _ if value <= original_alpha => TableEntryKind::UpperBound,
-                    _ if value >= beta => TableEntryKind::LowerBound,
-                    _ => TableEntryKind::Exact
-                },
-                value,
-                depth
+                TableEntry {
+                    kind: match value {
+                        _ if value <= original_alpha => TableEntryKind::UpperBound,
+                        _ if value >= beta => TableEntryKind::LowerBound,
+                        _ => TableEntryKind::Exact
+                    },
+                    value,
+                    depth,
+                    best_move: best_move.unwrap()
+                }
             );
             (value, info)
         }
