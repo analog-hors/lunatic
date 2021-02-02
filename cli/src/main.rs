@@ -21,8 +21,8 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            think_time: 10,
-            max_depth: 5,
+            think_time: 5,
+            max_depth: 64,
             engine_settings: LunaticContextSettings::default()
         }
     }
