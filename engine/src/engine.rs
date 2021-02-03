@@ -118,11 +118,13 @@ impl LunaticSearchState {
             }
         }
 
+        let subtree_depth = max_depth - depth;
         let original_alpha = alpha;
         
         *node_count += 1;
         if let Some(entry) = self.transposition_table.get(&board) {
-            if entry.depth < depth {
+            //Larger subtree means deeper search
+            if entry.subtree_depth >= subtree_depth {
                 match entry.kind {
                     TableEntryKind::Exact => return (entry.value, info),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
@@ -183,7 +185,7 @@ impl LunaticSearchState {
                         _ => TableEntryKind::Exact
                     },
                     value,
-                    depth,
+                    subtree_depth,
                     best_move: best_move.unwrap()
                 }
             );

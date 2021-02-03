@@ -11,7 +11,8 @@ pub enum TableEntryKind {
 pub struct TableEntry {
     pub kind: TableEntryKind,
     pub value: i32,
-    pub depth: u8,
+    ///Remaining depth to max depth (the size of the subtree)
+    pub subtree_depth: u8,
     pub best_move: ChessMove
 }
 
@@ -45,7 +46,7 @@ impl TranspositionTable {
         let hash = board.get_hash();
         let old = &mut self.0[hash as usize & TABLE_INDEX_MASK];
         if let Some(old) = old {
-            if old.1.depth < entry.depth {
+            if old.1.subtree_depth < entry.subtree_depth {
                 *old = (hash, entry);
             }
         } else {
