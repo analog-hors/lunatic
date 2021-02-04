@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::iter::Peekable;
 
 use chess::*;
 
@@ -29,7 +30,7 @@ impl<I: Ord> Iterator for MaxSelectionSorter<I> {
 }
 impl<I: Ord> ExactSizeIterator for MaxSelectionSorter<I> {}
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct MvvLvaMove {
     victim: Piece,
     attacker: Piece,
@@ -52,7 +53,7 @@ impl Ord for MvvLvaMove {
 pub struct SortedMoveGenerator {
     board: Board,
     pv_move: Option<ChessMove>,
-    captures: Option<MaxSelectionSorter<MvvLvaMove>>,
+    captures: Option<Peekable<MaxSelectionSorter<MvvLvaMove>>>,
     killer_move: Option<ChessMove>,
     moves: MoveGen
 }
@@ -86,10 +87,17 @@ impl Iterator for SortedMoveGenerator {
                 });
             }
             self.moves.set_iterator_mask(!EMPTY);
-            self.captures = Some(MaxSelectionSorter(mvv_lva_moves));
+            self.captures = Some(MaxSelectionSorter(mvv_lva_moves).peekable());
         }
-        if let Some(mv) = self.captures.as_mut().unwrap().next() {
-            return Some(mv.mv);
+        let captures = self.captures.as_mut().unwrap();
+        
+        if let Some(mv) = captures.peek() {
+            //Wininng or equal capture
+            if mv.victim >= mv.attacker {
+                let mv = mv.mv;
+                captures.next();
+                return Some(mv);
+            }
         }
 
         if let Some(mv) = self.killer_move.take() {
@@ -100,6 +108,11 @@ impl Iterator for SortedMoveGenerator {
                     return Some(mv);
                 }
             }
+        }
+
+        if let Some(mv) = captures.next() {
+            //Losing capture
+            return Some(mv.mv);
         }
 
         self.moves.next()
