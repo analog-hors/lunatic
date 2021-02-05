@@ -4,6 +4,7 @@ use std::iter::Peekable;
 use chess::*;
 
 use crate::table::*;
+use crate::engine::KillerTableEntry;
 
 struct MaxSelectionSorter<I>(Vec<I>);
 
@@ -54,7 +55,7 @@ pub struct SortedMoveGenerator {
     board: Board,
     pv_move: Option<ChessMove>,
     captures: Option<Peekable<MaxSelectionSorter<MvvLvaMove>>>,
-    killer_move: Option<ChessMove>,
+    killer_move: KillerTableEntry,
     moves: MoveGen
 }
 
@@ -71,9 +72,7 @@ impl Iterator for SortedMoveGenerator {
             let mut mvv_lva_moves = Vec::with_capacity(40);
             self.moves.set_iterator_mask(*self.board.combined());
             for mv in &mut self.moves {
-                if Some(mv) == self.killer_move {
-                    self.killer_move = None;
-                }
+                self.killer_move.retain(|&m| m == mv);
                 let victim = self.board
                     .piece_on(mv.get_dest())
                     .unwrap_or(Piece::Pawn); // en passant
@@ -100,7 +99,7 @@ impl Iterator for SortedMoveGenerator {
             }
         }
 
-        if let Some(mv) = self.killer_move.take() {
+        if let Some(mv) = self.killer_move.pop_front() {
             let mut moves = MoveGen::new_legal(&self.board);
             moves.set_iterator_mask(BitBoard::from_square(mv.get_dest()));
             for mv in moves {
@@ -120,7 +119,7 @@ impl Iterator for SortedMoveGenerator {
 }
 
 impl SortedMoveGenerator {
-    pub fn new(table: &TranspositionTable, killer_move: Option<ChessMove>, board: Board) -> Self {
+    pub fn new(table: &TranspositionTable, killer_move: KillerTableEntry, board: Board) -> Self {
         let pv_move = table.get(&board).map(|entry| entry.best_move);
         Self {
             board,

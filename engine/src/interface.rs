@@ -59,7 +59,7 @@ impl LunaticContext {
                     }
                     let depth_since_zeroing = game_history.len() as u8;
                     
-                    let mut search = LunaticSearchState::new();
+                    let mut search = LunaticSearchState::new(max_depth as usize);
                     let mut mv = None;
                     let mut depth = 0;
                     loop {

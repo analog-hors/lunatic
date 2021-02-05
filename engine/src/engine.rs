@@ -1,5 +1,6 @@
 use chess::*;
 use serde::{Serialize, Deserialize};
+use arraydeque::ArrayDeque;
 
 use crate::evaluation::Evaluator;
 use crate::table::*;
@@ -11,12 +12,10 @@ pub struct SearchInfo {
     pub nodes: u32
 }
 
-pub struct NodeInfo {
-    killer_move: Option<ChessMove>
-}
-
+pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
 pub struct LunaticSearchState {
-    transposition_table: TranspositionTable
+    transposition_table: TranspositionTable,
+    killer_table: Vec<KillerTableEntry>,
 }
 
 pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
@@ -26,10 +25,17 @@ pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
     board.piece_on(mv.get_dest()).is_some()
 }
 
+pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
+    //No captures or promotions
+    child_board.combined().popcnt() == board.combined().popcnt() &&
+    child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
+}
+
 impl LunaticSearchState {
-    pub fn new() -> Self {
+    pub fn new(killer_table_size: usize) -> Self {
         Self {
-            transposition_table: TranspositionTable::new()
+            transposition_table: TranspositionTable::new(),
+            killer_table: vec![KillerTableEntry::new(); killer_table_size]
         }
     }
 
@@ -45,7 +51,7 @@ impl LunaticSearchState {
         let mut nodes = 1;
         let mut best_move = None;
         let mut best_value = -i32::MAX;
-        let mut killer_move = None;
+        let killer_move = KillerTableEntry::new();
         for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_zeroes(mv, board) {
@@ -54,11 +60,10 @@ impl LunaticSearchState {
                 depth_since_zeroing + 1
             };
             game_history.push(child_board.get_hash());
-            let (mut value, info) = self.evaluate_position(
+            let value = -self.evaluate_position(
                 evaluator,
                 &child_board,
                 game_history,
-                killer_move,
                 &mut nodes,
                 0,
                 depth_since_zeroing,
@@ -66,11 +71,7 @@ impl LunaticSearchState {
                 -i32::MAX,
                 -best_value
             );
-            value *= -1;
             game_history.pop();
-            if info.killer_move.is_some() {
-                killer_move = info.killer_move;
-            }
             if best_move.is_none() || value > best_value {
                 best_move = Some(mv);
                 best_value = value;
@@ -87,21 +88,16 @@ impl LunaticSearchState {
         evaluator: &impl Evaluator,
         board: &Board,
         game_history: &mut Vec<u64>,
-        killer_move: Option<ChessMove>,
         node_count: &mut u32,
         depth: u8,
         depth_since_zeroing: u8,
         max_depth: u8,
         mut alpha: i32,
         mut beta: i32
-    ) -> (i32, NodeInfo) {
-        let mut info = NodeInfo {
-            killer_move: None
-        };
-
+    ) -> i32 {
         //Fifty move rule
         if depth_since_zeroing >= 100 {
-            return (0, info);
+            return 0;
         }
 
         //Threefold repetition
@@ -114,7 +110,7 @@ impl LunaticSearchState {
                 .filter(|&&hash| hash == board.get_hash())
                 .count();
             if repetitions >= 3 {
-                return (0, info);
+                return 0;
             }
         }
 
@@ -126,21 +122,21 @@ impl LunaticSearchState {
             //Larger subtree means deeper search
             if entry.subtree_depth >= subtree_depth {
                 match entry.kind {
-                    TableEntryKind::Exact => return (entry.value, info),
+                    TableEntryKind::Exact => return entry.value,
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
                     TableEntryKind::UpperBound => beta = beta.min(entry.value)
                 }
                 if alpha >= beta {
-                    return (entry.value, info);
+                    return entry.value;
                 }
             }
         }
         if depth >= max_depth || board.status() != BoardStatus::Ongoing {
-            (evaluator.evaluate(board, depth), info)
+            evaluator.evaluate(board, depth)
         } else {
             let mut value = -i32::MAX;
             let mut best_move = None;
-            let mut child_killer_move = None;
+            let killer_move = self.killer_table[depth as usize].clone();
             for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
                 let child_board = board.make_move_new(mv);
                 let depth_since_zeroing = if move_zeroes(mv, board) {
@@ -149,11 +145,10 @@ impl LunaticSearchState {
                     depth_since_zeroing + 1
                 };
                 game_history.push(child_board.get_hash());
-                let (mut child_value, child_info) = self.evaluate_position(
+                let child_value = -self.evaluate_position(
                     evaluator,
                     &child_board,
                     game_history,
-                    child_killer_move,
                     node_count,
                     depth + 1,
                     depth_since_zeroing,
@@ -161,18 +156,16 @@ impl LunaticSearchState {
                     -beta,
                     -alpha
                 );
-                child_value *= -1;
                 game_history.pop();
-                if child_info.killer_move.is_some() {
-                    child_killer_move = child_info.killer_move;
-                }
                 if child_value > value {
                     value = child_value;
                     best_move = Some(mv);
                 }
                 alpha = alpha.max(value);
                 if alpha >= beta {
-                    info.killer_move = Some(mv);
+                    if move_is_quiet(&board, &child_board) {
+                        self.killer_table[depth as usize].push_back(mv);
+                    }
                     break;
                 }
             }
@@ -189,7 +182,7 @@ impl LunaticSearchState {
                     best_move: best_move.unwrap()
                 }
             );
-            (value, info)
+            value
         }
     }
 }

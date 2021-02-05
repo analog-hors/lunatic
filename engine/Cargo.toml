@@ -10,3 +10,4 @@ edition = "2018"
 chess = "3.1"
 serde = { version = "1.0", features = ["derive"] }
 futures = "0.3.8"
+arraydeque = "0.4"

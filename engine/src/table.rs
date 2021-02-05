@@ -16,7 +16,7 @@ pub struct TableEntry {
     pub best_move: ChessMove
 }
 
-const TABLE_SIZE_POW_TWO_INDEX: usize = 15;
+const TABLE_SIZE_POW_TWO_INDEX: usize = 14;
 pub const TABLE_SIZE: usize = 1 << TABLE_SIZE_POW_TWO_INDEX;
 const TABLE_INDEX_MASK: usize = TABLE_SIZE - 1;
 
