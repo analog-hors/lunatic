@@ -24,6 +24,7 @@ const SETTINGS: &str = "lunatic_lichess_settings.yml";
 struct Settings {
     api: String,
     think_time: u64,
+    transposition_table_size: usize,
     max_depth: u8,
     engine_settings: LunaticContextSettings<StandardEvaluator>,
     opening_book: Option<String>,
@@ -35,6 +36,7 @@ impl Default for Settings {
         Self {
             api: "https://lichess.org".to_owned(),
             think_time: 5,
+            transposition_table_size: 4_000_000,
             max_depth: 64,
             engine_settings: LunaticContextSettings::default(),
             opening_book: None,
@@ -157,7 +159,12 @@ impl ChessSession {
         }
         if mv.is_none() {
             let think_begin = Instant::now();
-            self.engine.begin_think(initial_pos,  moves, self.settings.max_depth);
+            self.engine.begin_think(
+                initial_pos,
+                moves,
+                self.settings.transposition_table_size,
+                self.settings.max_depth
+            );
             tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
             let (engine_mv, info) = self.engine.end_think().await.unwrap().unwrap();
             let think_time = think_begin.elapsed();

@@ -16,21 +16,28 @@ pub struct TableEntry {
     pub best_move: ChessMove
 }
 
-const TABLE_SIZE_POW_TWO_INDEX: usize = 14;
-pub const TABLE_SIZE: usize = 1 << TABLE_SIZE_POW_TWO_INDEX;
-const TABLE_INDEX_MASK: usize = TABLE_SIZE - 1;
-
 #[derive(Debug)]
-pub struct TranspositionTable([Option<(u64, TableEntry)>; TABLE_SIZE]);
+pub struct TranspositionTable(Vec<Option<(u64, TableEntry)>>);
 
+//TODO consider using `unsafe` to speed up transposition table access by removing bounds checking?
 impl TranspositionTable {
-    pub fn new() -> Self {
-        Self([None; TABLE_SIZE])
+    ///Rounds up the number of entries to a power of two.
+    ///`panic` on overflow.
+    pub fn with_rounded_entries(entries: usize) -> Self {
+        Self(vec![None; entries.checked_next_power_of_two().unwrap()])
+    }
+
+    ///Converts the size in bytes to an amount of entries
+    ///then rounds up the size to the nearest power of two.
+    ///`panic` on overflow.
+    pub fn with_rounded_size(size: usize) -> Self {
+        Self::with_rounded_entries(size / std::mem::size_of::<TableEntry>())
     }
 
     pub fn get(&self, board: &Board) -> Option<TableEntry> {
         let hash = board.get_hash();
-        if let Some((entry_hash, entry)) = self.0[hash as usize & TABLE_INDEX_MASK] {
+        let mask = self.0.len() - 1;
+        if let Some((entry_hash, entry)) = self.0[hash as usize & mask] {
             if entry_hash == hash {
                 return Some(entry);
             }
@@ -44,7 +51,8 @@ impl TranspositionTable {
         entry: TableEntry
     ) {
         let hash = board.get_hash();
-        let old = &mut self.0[hash as usize & TABLE_INDEX_MASK];
+        let mask = self.0.len() - 1;
+        let old = &mut self.0[hash as usize & mask];
         if let Some(old) = old {
             if old.1.subtree_depth < entry.subtree_depth {
                 *old = (hash, entry);

@@ -32,9 +32,9 @@ pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
 }
 
 impl LunaticSearchState {
-    pub fn new(killer_table_size: usize) -> Self {
+    pub fn new(transposition_table_size: usize, killer_table_size: usize) -> Self {
         Self {
-            transposition_table: TranspositionTable::new(),
+            transposition_table: TranspositionTable::with_rounded_size(transposition_table_size),
             killer_table: vec![KillerTableEntry::new(); killer_table_size]
         }
     }

@@ -24,6 +24,7 @@ enum LunaticContextCommand {
     BeginThink {
         initial_pos: Board,
         moves: Vec<ChessMove>,
+        transposition_table_size: usize,
         max_depth: u8
     },
     EndThink(oneshot::Sender<Option<(ChessMove, MoveInfo)>>)
@@ -46,7 +47,12 @@ impl LunaticContext {
         let (thinker, thinker_recv) = mpsc::channel();
         std::thread::spawn(move || {
             while let Ok(command) = thinker_recv.recv() {
-                if let LunaticContextCommand::BeginThink { initial_pos, moves, max_depth } = command {
+                if let LunaticContextCommand::BeginThink {
+                    initial_pos,
+                    moves,
+                    transposition_table_size,
+                    max_depth
+                } = command {
                     let mut game_history = Vec::with_capacity(100);
                     let mut board = initial_pos;
                     game_history.push(board.get_hash());
@@ -59,7 +65,10 @@ impl LunaticContext {
                     }
                     let depth_since_zeroing = game_history.len() as u8;
                     
-                    let mut search = LunaticSearchState::new(max_depth as usize);
+                    let mut search = LunaticSearchState::new(
+                        transposition_table_size,
+                        max_depth as usize
+                    );
                     let mut mv = None;
                     let mut depth = 0;
                     loop {
@@ -103,10 +112,17 @@ impl LunaticContext {
         }
     }
 
-    pub fn begin_think(&self, initial_pos: Board, moves: Vec<ChessMove>, max_depth: u8) {
+    pub fn begin_think(
+        &self,
+        initial_pos: Board,
+        moves: Vec<ChessMove>,
+        transposition_table_size: usize,
+        max_depth: u8
+    ) {
         self.thinker.send(LunaticContextCommand::BeginThink {
             initial_pos,
             moves,
+            transposition_table_size,
             max_depth
         }).unwrap();
     }

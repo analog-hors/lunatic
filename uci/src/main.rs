@@ -3,7 +3,7 @@ use std::time::Instant;
 use std::sync::mpsc::{channel, TryRecvError};
 
 use chess::*;
-use vampirc_uci::{UciMessage, UciTimeControl, Duration, UciInfoAttribute};
+use vampirc_uci::{Duration, UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::*;
 use lunatic::MoveInfo;
 use lunatic::evaluation::StandardEvaluator;
@@ -14,8 +14,15 @@ struct EngineSearch {
 }
 
 impl EngineSearch {
-    fn start(engine: &LunaticContext, initial_pos: Board, moves: Vec<ChessMove>, max_depth: u8, think_time: Duration) -> Self {
-        engine.begin_think(initial_pos, moves, max_depth);
+    fn start(
+        engine: &LunaticContext,
+        initial_pos: Board,
+        moves: Vec<ChessMove>,
+        transposition_table_size: usize,
+        max_depth: u8,
+        think_time: Duration
+    ) -> Self {
+        engine.begin_think(initial_pos, moves, transposition_table_size, max_depth);
         Self {
             start: Instant::now(),
             think_time
@@ -50,6 +57,8 @@ fn main() {
     let settings = LunaticContextSettings::<StandardEvaluator>::default();
     let engine = LunaticContext::new(settings);
     let mut search = None;
+    const MEGABYTE: usize = 1000_000;
+    let mut transposition_table_size = 4 * MEGABYTE;
 
     let (messages_send, messages) = channel();
     std::thread::spawn(move || {
@@ -66,10 +75,25 @@ fn main() {
                     send_message(UciMessage::id_name("Lunatic"));
                     send_message(UciMessage::id_author("Analog Hors"));
                     send_message(UciMessage::UciOk);
+                    send_message(UciMessage::Option(UciOptionConfig::Spin {
+                        name: "Hash".to_owned(),
+                        default: Some((transposition_table_size / MEGABYTE) as i64),
+                        min: Some(0),
+                        max: None
+                    }));
                 }
                 UciMessage::Debug(_) => {}
                 UciMessage::IsReady => send_message(UciMessage::ReadyOk),
-                UciMessage::SetOption { .. } => {}
+                UciMessage::SetOption { name, value } => match &name[..] {
+                    "Hash" => {
+                        transposition_table_size = value
+                            .unwrap()
+                            .parse::<usize>()
+                            .unwrap()
+                            * MEGABYTE
+                    },
+                    _ => {}
+                }
                 UciMessage::UciNewGame => {}
     
                 UciMessage::Position { fen, moves, .. } => {
@@ -98,6 +122,7 @@ fn main() {
                         &engine,
                         initial_pos,
                         moves,
+                        transposition_table_size,
                         max_depth,
                         think_time
                     ));
