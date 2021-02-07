@@ -31,6 +31,29 @@ pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
     child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
 }
 
+fn draw_by_move_rule(board: &Board, game_history: &[u64], depth_since_zeroing: u8) -> bool {
+    //Fifty move rule
+    if depth_since_zeroing >= 100 {
+        return true;
+    }
+
+    //Threefold repetition
+    if depth_since_zeroing >= 6 {
+        let repetitions = game_history
+            .iter()
+            .rev()
+            .take(depth_since_zeroing as usize)
+            .step_by(2) // Every second ply so it's our turn
+            .filter(|&&hash| hash == board.get_hash())
+            .count();
+        if repetitions >= 3 {
+            return true;
+        }
+    }
+    
+    false
+}
+
 trait SearchReturnType {
     type Output;
 
@@ -115,29 +138,15 @@ impl LunaticSearchState {
         mut alpha: i32,
         mut beta: i32
     ) -> T::Output {
-        //Fifty move rule
-        if depth_since_zeroing >= 100 {
-            return T::convert(|| 0, None, *node_count);
-        }
+        *node_count += 1;
 
-        //Threefold repetition
-        if depth_since_zeroing >= 6 {
-            let repetitions = game_history
-                .iter()
-                .rev()
-                .take(depth_since_zeroing as usize)
-                .step_by(2) // Every second ply so it's our turn
-                .filter(|&&hash| hash == board.get_hash())
-                .count();
-            if repetitions >= 3 {
-                return T::convert(|| 0, None, *node_count);
-            }
+        if draw_by_move_rule(board, game_history, depth_since_zeroing) {
+            return T::convert(|| 0, None, *node_count);
         }
 
         let subtree_depth = max_depth - depth;
         let original_alpha = alpha;
         
-        *node_count += 1;
         if let Some(entry) = self.transposition_table.get(&board) {
             //Larger subtree means deeper search
             if entry.subtree_depth >= subtree_depth {
@@ -160,7 +169,20 @@ impl LunaticSearchState {
             }
         }
         if depth >= max_depth || board.status() != BoardStatus::Ongoing {
-            T::convert(|| evaluator.evaluate(board, depth), None, *node_count)
+            //TODO this is kinda ugly
+            let current_node_count = *node_count;
+            T::convert(|| {
+                self.quiescence_search(
+                    evaluator,
+                    board,
+                    game_history,
+                    node_count,
+                    depth,
+                    depth_since_zeroing,
+                    alpha,
+                    beta
+                )
+            }, None, current_node_count)
         } else {
             let mut value = -i32::MAX;
             let mut best_move = None;
@@ -213,5 +235,65 @@ impl LunaticSearchState {
             );
             T::convert(|| value, Some(best_move), *node_count)
         }
+    }
+
+    fn quiescence_search(
+        &mut self,
+        evaluator: &impl Evaluator,
+        board: &Board,
+        game_history: &mut Vec<u64>,
+        node_count: &mut u32,
+        depth: u8,
+        depth_since_zeroing: u8,
+        mut alpha: i32,
+        beta: i32
+    ) -> i32 {
+        *node_count += 1;
+
+        if draw_by_move_rule(board, game_history, depth_since_zeroing) {
+            return 0;
+        }
+
+        //The reason we are allowed to safely return the alpha score
+        //is the assumption that even though we only check captures,
+        //at any point in the search there is at least one other
+        //move that matches or is better than the value, so we didn't
+        //*necessarily* have to play this line and it's *probably* at
+        //least that value.
+        let stand_pat = evaluator.evaluate(board, depth);
+        if stand_pat > beta {
+            return beta;
+        }
+        if alpha < stand_pat {
+            alpha = stand_pat;
+        }
+        let mut captures = MoveGen::new_legal(board);
+        //TODO excludes en-passant, does this matter?
+        captures.set_iterator_mask(*board.combined());
+        for mv in captures {
+            let child_board = board.make_move_new(mv);
+            let depth_since_zeroing = if move_zeroes(mv, board) {
+                1
+            } else {
+                depth_since_zeroing + 1
+            };
+            game_history.push(child_board.get_hash());
+            let child_value = -self.quiescence_search(
+                evaluator,
+                &child_board,
+                game_history,
+                node_count,
+                depth + 1,
+                depth_since_zeroing,
+                -beta,
+                -alpha
+            );
+            game_history.pop();
+            if child_value >= beta {
+                return beta;
+            }
+            alpha = alpha.max(child_value);
+        }
+        alpha
     }
 }
