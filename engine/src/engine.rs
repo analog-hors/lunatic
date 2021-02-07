@@ -31,6 +31,47 @@ pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
     child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
 }
 
+trait SearchReturnType {
+    type Output;
+
+    fn convert(
+        get_value: impl FnOnce() -> i32,
+        mv: Option<ChessMove>,
+        nodes: u32
+    ) -> Self::Output;
+}
+
+struct BestMove;
+
+impl SearchReturnType for BestMove {
+    type Output = Option<(ChessMove, SearchInfo)>;
+
+    fn convert(
+        get_value: impl FnOnce() -> i32,
+        mv: Option<ChessMove>,
+        nodes: u32
+    ) -> Self::Output {
+        mv.map(|mv| (mv, SearchInfo {
+            value: get_value(),
+            nodes
+        }))
+    }
+}
+
+struct PositionEvaluation;
+
+impl SearchReturnType for PositionEvaluation {
+    type Output = i32;
+
+    fn convert(
+        get_value: impl FnOnce() -> i32,
+        _: Option<ChessMove>,
+        _: u32
+    ) -> Self::Output {
+        get_value()
+    }
+}
+
 impl LunaticSearchState {
     pub fn new(transposition_table_size: usize, killer_table_size: usize) -> Self {
         Self {
@@ -39,53 +80,32 @@ impl LunaticSearchState {
         }
     }
 
-    pub fn best_move(
+    pub fn best_move<E: Evaluator>(
         &mut self,
-        evaluator: &impl Evaluator,
+        evaluator: &E,
         board: &Board,
         game_history: &mut Vec<u64>,
         // Zeroing means a move that resets the 50 move rule counter and represents an irreversible move.
         depth_since_zeroing: u8,
         max_depth: u8
     ) -> Option<(ChessMove, SearchInfo)> {
-        let mut nodes = 1;
-        let mut best_move = None;
-        let mut best_value = -i32::MAX;
-        let killer_move = KillerTableEntry::new();
-        for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
-            let child_board = board.make_move_new(mv);
-            let depth_since_zeroing = if move_zeroes(mv, board) {
-                1
-            } else {
-                depth_since_zeroing + 1
-            };
-            game_history.push(child_board.get_hash());
-            let value = -self.evaluate_position(
-                evaluator,
-                &child_board,
-                game_history,
-                &mut nodes,
-                0,
-                depth_since_zeroing,
-                max_depth,
-                -i32::MAX,
-                -best_value
-            );
-            game_history.pop();
-            if best_move.is_none() || value > best_value {
-                best_move = Some(mv);
-                best_value = value;
-            }
-        }
-        best_move.map(|mv| (mv, SearchInfo {
-            value: best_value,
-            nodes
-        }))
+        let mut nodes = 0;
+        self.search_position::<BestMove, E>(
+            evaluator,
+            board,
+            game_history,
+            &mut nodes,
+            0,
+            depth_since_zeroing,
+            max_depth,
+            -i32::MAX,
+            i32::MAX
+        )
     }
     
-    pub fn evaluate_position(
+    fn search_position<T: SearchReturnType, E: Evaluator>(
         &mut self,
-        evaluator: &impl Evaluator,
+        evaluator: &E,
         board: &Board,
         game_history: &mut Vec<u64>,
         node_count: &mut u32,
@@ -94,10 +114,10 @@ impl LunaticSearchState {
         max_depth: u8,
         mut alpha: i32,
         mut beta: i32
-    ) -> i32 {
+    ) -> T::Output {
         //Fifty move rule
         if depth_since_zeroing >= 100 {
-            return 0;
+            return T::convert(|| 0, None, *node_count);
         }
 
         //Threefold repetition
@@ -110,7 +130,7 @@ impl LunaticSearchState {
                 .filter(|&&hash| hash == board.get_hash())
                 .count();
             if repetitions >= 3 {
-                return 0;
+                return T::convert(|| 0, None, *node_count);
             }
         }
 
@@ -122,17 +142,25 @@ impl LunaticSearchState {
             //Larger subtree means deeper search
             if entry.subtree_depth >= subtree_depth {
                 match entry.kind {
-                    TableEntryKind::Exact => return entry.value,
+                    TableEntryKind::Exact => return T::convert(
+                        || entry.value,
+                        Some(entry.best_move),
+                        *node_count
+                    ),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
                     TableEntryKind::UpperBound => beta = beta.min(entry.value)
                 }
                 if alpha >= beta {
-                    return entry.value;
+                    return T::convert(
+                        || entry.value,
+                        Some(entry.best_move),
+                        *node_count
+                    );
                 }
             }
         }
         if depth >= max_depth || board.status() != BoardStatus::Ongoing {
-            evaluator.evaluate(board, depth)
+            T::convert(|| evaluator.evaluate(board, depth), None, *node_count)
         } else {
             let mut value = -i32::MAX;
             let mut best_move = None;
@@ -145,7 +173,7 @@ impl LunaticSearchState {
                     depth_since_zeroing + 1
                 };
                 game_history.push(child_board.get_hash());
-                let child_value = -self.evaluate_position(
+                let child_value = -self.search_position::<PositionEvaluation, E>(
                     evaluator,
                     &child_board,
                     game_history,
@@ -169,6 +197,7 @@ impl LunaticSearchState {
                     break;
                 }
             }
+            let best_move = best_move.unwrap();
             self.transposition_table.set(
                 &board,
                 TableEntry {
@@ -179,10 +208,10 @@ impl LunaticSearchState {
                     },
                     value,
                     subtree_depth,
-                    best_move: best_move.unwrap()
+                    best_move
                 }
             );
-            value
+            T::convert(|| value, Some(best_move), *node_count)
         }
     }
 }
