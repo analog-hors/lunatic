@@ -55,8 +55,21 @@ struct ChessSession {
 }
 
 enum ClientMoveInfo {
-    Engine(MoveInfo, Duration),
+    Engine(Duration),
     Book(u16)
+}
+
+fn print_info(iter: impl Iterator<Item=SearchInfo>) {
+    for info in iter {
+        println!("Value: {}", info.value);
+        println!("Depth: {}", info.depth);
+        println!("Nodes: {}", info.nodes);
+        print!("PV:");
+        for mv in info.principal_variation {
+            print!(" {}", mv);
+        }
+        println!();
+    }
 }
 
 impl ChessSession {
@@ -159,21 +172,24 @@ impl ChessSession {
         }
         if mv.is_none() {
             let think_begin = Instant::now();
-            self.engine.begin_think(
+            let info_stream = self.engine.begin_think(
                 initial_pos,
                 moves,
                 self.settings.transposition_table_size,
                 self.settings.max_depth
             );
-            tokio::time::delay_for(Duration::from_secs(self.settings.think_time)).await;
-            let (engine_mv, info) = self.engine.end_think().await.unwrap().unwrap();
-            let think_time = think_begin.elapsed();
-            mv = Some((engine_mv, ClientMoveInfo::Engine(info, think_time)));
+            let now = Instant::now();
+            while now.elapsed().as_secs() < self.settings.think_time {
+                print_info(info_stream.try_iter());
+            }
+            let engine_mv = self.engine.end_think().await.unwrap().unwrap();
+            print_info(info_stream.try_iter());
+            mv = Some((engine_mv, ClientMoveInfo::Engine(think_begin.elapsed())));
         }
         let (mv, info) = mv.unwrap();
         println!("{}", mv);
         match info {
-            ClientMoveInfo::Engine(info, think_time) => {
+            ClientMoveInfo::Engine(think_time) => {
                 let think_time = think_time.as_secs_f32();
                 println!(
                     "Thought for {:.1} seconds (+{:.1} over target of {})",
@@ -181,9 +197,6 @@ impl ChessSession {
                     think_time - self.settings.think_time as f32,
                     self.settings.think_time
                 );
-                println!("Value: {}", info.value);
-                println!("Nodes: {}", info.nodes);
-                println!("Depth: {}", info.depth);
             }
             ClientMoveInfo::Book(weight) => {
                 println!("Picked book move.");

@@ -3,7 +3,6 @@
 members = [
     "engine",
     "uci",
-    "cli",
     "lichess"
 ]
 

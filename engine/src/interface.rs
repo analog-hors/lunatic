@@ -1,11 +1,11 @@
 use serde::{Serialize, Deserialize};
 use chess::*;
 use std::sync::mpsc;
-use std::future::Future;
 use futures::channel::oneshot;
 
 use crate::evaluation::*;
 use crate::engine::*;
+pub use crate::engine::SearchInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LunaticContextSettings<E> {
@@ -25,16 +25,10 @@ enum LunaticContextCommand {
         initial_pos: Board,
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
-        max_depth: u8
+        max_depth: u8,
+        info_channel: mpsc::Sender<SearchInfo>
     },
-    EndThink(oneshot::Sender<Option<(ChessMove, MoveInfo)>>)
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-pub struct MoveInfo {
-    pub value: i32,
-    pub nodes: u32,
-    pub depth: u32
+    EndThink(oneshot::Sender<Option<ChessMove>>)
 }
 
 #[derive(Debug)]
@@ -51,7 +45,8 @@ impl LunaticContext {
                     initial_pos,
                     moves,
                     transposition_table_size,
-                    max_depth
+                    max_depth,
+                    info_channel
                 } = command {
                     let mut game_history = Vec::with_capacity(100);
                     let mut board = initial_pos;
@@ -79,13 +74,17 @@ impl LunaticContext {
                                 return
                             }
                         } else {
-                            mv = search.best_move(
+                            let search = search.best_move(
                                 &settings.evaluator,
                                 &board,
                                 &mut game_history,
                                 depth_since_zeroing,
                                 depth as u8
                             );
+                            if let Some((m, info)) = search {
+                                mv = Some(m);
+                                let _ = info_channel.send(info);
+                            }
                             depth += 1;
                             match thinker_recv.try_recv() {
                                 Ok(command) => command,
@@ -94,12 +93,6 @@ impl LunaticContext {
                             }
                         };
                         if let LunaticContextCommand::EndThink(resolver) = command {
-                            let mv = mv
-                                .map(|(mv, info)| (mv, MoveInfo {
-                                    value: info.value,
-                                    nodes: info.nodes,
-                                    depth
-                                }));
                             let _ = resolver.send(mv);
                             break;
                         }
@@ -118,18 +111,21 @@ impl LunaticContext {
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
         max_depth: u8
-    ) {
+    ) -> mpsc::Receiver<SearchInfo> {
+        let (info_channel, info_channel_recv) = mpsc::channel();
         self.thinker.send(LunaticContextCommand::BeginThink {
             initial_pos,
             moves,
             transposition_table_size,
-            max_depth
+            max_depth,
+            info_channel
         }).unwrap();
+        info_channel_recv
     }
     
-    pub fn end_think(&self) -> impl Future<Output=Result<Option<(ChessMove, MoveInfo)>, oneshot::Canceled>>  {
+    pub async fn end_think(&self) -> Result<Option<ChessMove>, oneshot::Canceled>  {
         let (resolver, receiver) = oneshot::channel();
         self.thinker.send(LunaticContextCommand::EndThink(resolver)).unwrap();
-        receiver
+        receiver.await
     }
 }

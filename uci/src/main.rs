@@ -5,12 +5,12 @@ use std::sync::mpsc::{channel, TryRecvError};
 use chess::*;
 use vampirc_uci::{Duration, UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::*;
-use lunatic::MoveInfo;
 use lunatic::evaluation::StandardEvaluator;
 
 struct EngineSearch {
     start: Instant,
-    think_time: Duration
+    think_time: Duration,
+    info_channel: std::sync::mpsc::Receiver<SearchInfo>
 }
 
 impl EngineSearch {
@@ -22,10 +22,11 @@ impl EngineSearch {
         max_depth: u8,
         think_time: Duration
     ) -> Self {
-        engine.begin_think(initial_pos, moves, transposition_table_size, max_depth);
+        let info_channel = engine.begin_think(initial_pos, moves, transposition_table_size, max_depth);
         Self {
             start: Instant::now(),
-            think_time
+            think_time,
+            info_channel
         }
     }
 
@@ -33,23 +34,27 @@ impl EngineSearch {
         self.start.elapsed() >= self.think_time.to_std().unwrap()
     }
 
-    fn finish(engine: &LunaticContext) -> Option<(ChessMove, MoveInfo)> {
+    fn finish(engine: &LunaticContext) -> Option<ChessMove> {
         futures::executor::block_on(engine.end_think()).unwrap()
     }
-}
-
-fn send_move(mv: ChessMove, info: MoveInfo) {
-    send_message(UciMessage::best_move(mv));
-    send_message(UciMessage::Info(vec![
-        UciInfoAttribute::from_centipawns(info.value),
-        UciInfoAttribute::Depth(info.depth as u8),
-        UciInfoAttribute::Nodes(info.nodes as u64)
-    ]));
 }
 
 fn send_message(message: UciMessage) {
     println!("{}", message);
     std::io::stdout().flush().unwrap();
+}
+
+fn send_move(mv: ChessMove) {
+    send_message(UciMessage::best_move(mv));
+}
+
+fn send_info(info: SearchInfo) {
+    send_message(UciMessage::Info(vec![
+        UciInfoAttribute::from_centipawns(info.value),
+        UciInfoAttribute::Depth(info.depth as u8),
+        UciInfoAttribute::Nodes(info.nodes as u64),
+        UciInfoAttribute::Pv(info.principal_variation)
+    ]));
 }
 
 fn main() {
@@ -128,9 +133,12 @@ fn main() {
                     ));
                 }
                 UciMessage::Stop => {
-                    if search.take().is_some() {
-                        let (mv, info) = EngineSearch::finish(&engine).unwrap();
-                        send_move(mv, info);
+                    if let Some(search) = search.take() {
+                        let mv = EngineSearch::finish(&engine).unwrap();
+                        for search in search.info_channel.try_iter() {
+                            send_info(search);
+                        }
+                        send_move(mv);
                     }
                 }
                 
@@ -144,10 +152,19 @@ fn main() {
             Err(TryRecvError::Empty) => {},
             Err(TryRecvError::Disconnected) => break
         }
+        if let Some(search) = &mut search {
+            for search in search.info_channel.try_iter() {
+                send_info(search);
+            }
+        }
+        
         if let Some(s) = &search {
             if s.think_time_elapsed() {
-                let (mv, info) = EngineSearch::finish(&engine).unwrap();
-                send_move(mv, info);
+                let mv = EngineSearch::finish(&engine).unwrap();
+                for search in s.info_channel.try_iter() {
+                    send_info(search);
+                }
+                send_move(mv);
                 search = None;
             }
         }

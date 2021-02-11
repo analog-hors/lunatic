@@ -1,15 +1,16 @@
 use chess::*;
-use serde::{Serialize, Deserialize};
 use arraydeque::ArrayDeque;
 
 use crate::evaluation::Evaluator;
 use crate::table::*;
 use crate::moves::SortedMoveGenerator;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SearchInfo {
     pub value: i32,
-    pub nodes: u32
+    pub nodes: u32,
+    pub depth: u8,
+    pub principal_variation: Vec<ChessMove>
 }
 
 pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
@@ -59,25 +60,17 @@ trait SearchReturnType {
 
     fn convert(
         get_value: impl FnOnce() -> i32,
-        mv: Option<ChessMove>,
-        nodes: u32
+        mv: Option<ChessMove>
     ) -> Self::Output;
 }
 
 struct BestMove;
 
 impl SearchReturnType for BestMove {
-    type Output = Option<(ChessMove, SearchInfo)>;
+    type Output = Option<(ChessMove, i32)>;
 
-    fn convert(
-        get_value: impl FnOnce() -> i32,
-        mv: Option<ChessMove>,
-        nodes: u32
-    ) -> Self::Output {
-        mv.map(|mv| (mv, SearchInfo {
-            value: get_value(),
-            nodes
-        }))
+    fn convert(get_value: impl FnOnce() -> i32, mv: Option<ChessMove>) -> Self::Output {
+        mv.map(|mv| (mv, get_value()))
     }
 }
 
@@ -86,11 +79,7 @@ struct PositionEvaluation;
 impl SearchReturnType for PositionEvaluation {
     type Output = i32;
 
-    fn convert(
-        get_value: impl FnOnce() -> i32,
-        _: Option<ChessMove>,
-        _: u32
-    ) -> Self::Output {
+    fn convert(get_value: impl FnOnce() -> i32, _: Option<ChessMove>) -> Self::Output {
         get_value()
     }
 }
@@ -114,16 +103,50 @@ impl LunaticSearchState {
     ) -> Option<(ChessMove, SearchInfo)> {
         let mut nodes = 0;
         self.search_position::<BestMove, E>(
-            evaluator,
-            board,
-            game_history,
-            &mut nodes,
-            0,
-            depth_since_zeroing,
-            max_depth,
-            -i32::MAX,
-            i32::MAX
-        )
+                evaluator,
+                board,
+                game_history,
+                &mut nodes,
+                0,
+                depth_since_zeroing,
+                max_depth,
+                -i32::MAX,
+                i32::MAX
+            )
+            .map(|(mv, value)| {
+                let mut principal_variation = Vec::new();
+                let mut board = *board;
+                let mut depth_since_zeroing = depth_since_zeroing;
+
+                let mut next_move = Some(mv);
+                while let Some(mv) = next_move.take() {
+                    principal_variation.push(mv);
+                    game_history.push(board.get_hash());
+                    depth_since_zeroing = if move_zeroes(mv, &board) {
+                        1
+                    } else {
+                        depth_since_zeroing + 1
+                    };
+                    board = board.make_move_new(mv);
+
+                    next_move = if draw_by_move_rule(&board, game_history, depth_since_zeroing) {
+                        None
+                    } else {
+                        self.transposition_table.get(&board).map(|e| e.best_move)
+                    };
+                }
+                for _ in 0..principal_variation.len() {
+                    game_history.pop();
+                }
+                
+                let info = SearchInfo {
+                    value,
+                    nodes,
+                    depth: max_depth,
+                    principal_variation
+                };
+                (mv, info)
+            })
     }
     
     fn search_position<T: SearchReturnType, E: Evaluator>(
@@ -141,7 +164,7 @@ impl LunaticSearchState {
         *node_count += 1;
 
         if draw_by_move_rule(board, game_history, depth_since_zeroing) {
-            return T::convert(|| 0, None, *node_count);
+            return T::convert(|| 0, None);
         }
 
         let subtree_depth = max_depth - depth;
@@ -151,38 +174,31 @@ impl LunaticSearchState {
             //Larger subtree means deeper search
             if entry.subtree_depth >= subtree_depth {
                 match entry.kind {
-                    TableEntryKind::Exact => return T::convert(
-                        || entry.value,
-                        Some(entry.best_move),
-                        *node_count
-                    ),
+                    TableEntryKind::Exact => return T::convert(|| entry.value, Some(entry.best_move)),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
                     TableEntryKind::UpperBound => beta = beta.min(entry.value)
                 }
                 if alpha >= beta {
-                    return T::convert(
-                        || entry.value,
-                        Some(entry.best_move),
-                        *node_count
-                    );
+                    return T::convert(|| entry.value, Some(entry.best_move));
                 }
             }
         }
         if depth >= max_depth || board.status() != BoardStatus::Ongoing {
-            //TODO this is kinda ugly
-            let current_node_count = *node_count;
-            T::convert(|| {
-                self.quiescence_search(
-                    evaluator,
-                    board,
-                    game_history,
-                    node_count,
-                    depth,
-                    depth_since_zeroing,
-                    alpha,
-                    beta
-                )
-            }, None, current_node_count)
+            T::convert(
+                || {
+                    self.quiescence_search(
+                        evaluator,
+                        board,
+                        game_history,
+                        node_count,
+                        depth,
+                        depth_since_zeroing,
+                        alpha,
+                        beta
+                    )
+                }, 
+                None
+            )
         } else {
             let mut value = -i32::MAX;
             let mut best_move = None;
@@ -233,7 +249,7 @@ impl LunaticSearchState {
                     best_move
                 }
             );
-            T::convert(|| value, Some(best_move), *node_count)
+            T::convert(|| value, Some(best_move))
         }
     }
 
