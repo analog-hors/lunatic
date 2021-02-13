@@ -1,13 +1,13 @@
 use chess::*;
 use arraydeque::ArrayDeque;
 
-use crate::evaluation::Evaluator;
+use crate::evaluation::{Evaluation, Evaluator};
 use crate::table::*;
 use crate::moves::SortedMoveGenerator;
 
 #[derive(Debug, Clone)]
 pub struct SearchInfo {
-    pub value: i32,
+    pub value: Evaluation,
     pub nodes: u32,
     pub depth: u8,
     pub principal_variation: Vec<ChessMove>
@@ -59,7 +59,7 @@ trait SearchReturnType {
     type Output;
 
     fn convert(
-        get_value: impl FnOnce() -> i32,
+        get_value: impl FnOnce() -> Evaluation,
         mv: Option<ChessMove>
     ) -> Self::Output;
 }
@@ -67,9 +67,9 @@ trait SearchReturnType {
 struct BestMove;
 
 impl SearchReturnType for BestMove {
-    type Output = Option<(ChessMove, i32)>;
+    type Output = Option<(ChessMove, Evaluation)>;
 
-    fn convert(get_value: impl FnOnce() -> i32, mv: Option<ChessMove>) -> Self::Output {
+    fn convert(get_value: impl FnOnce() -> Evaluation, mv: Option<ChessMove>) -> Self::Output {
         mv.map(|mv| (mv, get_value()))
     }
 }
@@ -77,9 +77,9 @@ impl SearchReturnType for BestMove {
 struct PositionEvaluation;
 
 impl SearchReturnType for PositionEvaluation {
-    type Output = i32;
+    type Output = Evaluation;
 
-    fn convert(get_value: impl FnOnce() -> i32, _: Option<ChessMove>) -> Self::Output {
+    fn convert(get_value: impl FnOnce() -> Evaluation, _: Option<ChessMove>) -> Self::Output {
         get_value()
     }
 }
@@ -110,8 +110,8 @@ impl LunaticSearchState {
                 0,
                 depth_since_zeroing,
                 max_depth,
-                -i32::MAX,
-                i32::MAX
+                -Evaluation::INFINITY,
+                Evaluation::INFINITY
             )
             .map(|(mv, value)| {
                 let mut principal_variation = Vec::new();
@@ -158,13 +158,13 @@ impl LunaticSearchState {
         depth: u8,
         depth_since_zeroing: u8,
         max_depth: u8,
-        mut alpha: i32,
-        mut beta: i32
+        mut alpha: Evaluation,
+        mut beta: Evaluation
     ) -> T::Output {
         *node_count += 1;
 
         if draw_by_move_rule(board, game_history, depth_since_zeroing) {
-            return T::convert(|| 0, None);
+            return T::convert(|| Evaluation::DRAW, None);
         }
 
         let subtree_depth = max_depth - depth;
@@ -200,7 +200,7 @@ impl LunaticSearchState {
                 None
             )
         } else {
-            let mut value = -i32::MAX;
+            let mut value = -Evaluation::INFINITY;
             let mut best_move = None;
             let killer_move = self.killer_table[depth as usize].clone();
             for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
@@ -261,13 +261,13 @@ impl LunaticSearchState {
         node_count: &mut u32,
         depth: u8,
         depth_since_zeroing: u8,
-        mut alpha: i32,
-        beta: i32
-    ) -> i32 {
+        mut alpha: Evaluation,
+        beta: Evaluation
+    ) -> Evaluation {
         *node_count += 1;
 
         if draw_by_move_rule(board, game_history, depth_since_zeroing) {
-            return 0;
+            return Evaluation::DRAW;
         }
 
         //The reason we are allowed to safely return the alpha score

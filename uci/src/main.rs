@@ -5,7 +5,7 @@ use std::sync::mpsc::{channel, TryRecvError};
 use chess::*;
 use vampirc_uci::{Duration, UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::*;
-use lunatic::evaluation::StandardEvaluator;
+use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
 
 struct EngineSearch {
     start: Instant,
@@ -50,7 +50,11 @@ fn send_move(mv: ChessMove) {
 
 fn send_info(info: SearchInfo) {
     send_message(UciMessage::Info(vec![
-        UciInfoAttribute::from_centipawns(info.value),
+        match info.value.kind() {
+            EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
+            EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
+            EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
+        },
         UciInfoAttribute::Depth(info.depth as u8),
         UciInfoAttribute::Nodes(info.nodes as u64),
         UciInfoAttribute::Pv(info.principal_variation)

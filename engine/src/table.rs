@@ -1,5 +1,7 @@
 use chess::*;
 
+use crate::evaluation::Evaluation;
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableEntryKind {
     Exact,
@@ -10,7 +12,7 @@ pub enum TableEntryKind {
 #[derive(Debug, Copy, Clone)]
 pub struct TableEntry {
     pub kind: TableEntryKind,
-    pub value: i32,
+    pub value: Evaluation,
     ///Remaining depth to max depth (the size of the subtree)
     pub subtree_depth: u8,
     pub best_move: ChessMove

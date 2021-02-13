@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 use chess::*;
 
-use crate::evaluation::Evaluator;
+use crate::evaluation::{Evaluation, Evaluator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PieceSquareTable(pub [[i32; 8]; 8]);
@@ -125,21 +125,20 @@ impl Default for StandardEvaluator {
 }
 
 impl Evaluator for StandardEvaluator {
-    fn evaluate(&self, board: &Board, depth: u8) -> i32 {
+    fn evaluate(&self, board: &Board, depth: u8) -> Evaluation {
         match board.status() {
             BoardStatus::Ongoing => {
                 let phase = Self::game_phase(&board);
                 let white = self.evaluate_for_side(board, chess::Color::White, phase);
                 let black = self.evaluate_for_side(board, chess::Color::Black, phase);
-                if board.side_to_move() == Color::White {
+                Evaluation::from_centipawns(if board.side_to_move() == Color::White {
                     white - black
                 } else {
                     black - white
-                }
+                })
             },
-            //Checkmate decays so that shorter mate sequences are valued over longer ones
-            BoardStatus::Checkmate => -(i32::MAX - depth as i32),
-            BoardStatus::Stalemate => 0
+            BoardStatus::Checkmate => Evaluation::mated_in(depth),
+            BoardStatus::Stalemate => Evaluation::DRAW
         }
     }
 }
