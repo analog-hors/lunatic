@@ -79,13 +79,13 @@ fn main() {
                 UciMessage::Uci => {
                     send_message(UciMessage::id_name("Lunatic"));
                     send_message(UciMessage::id_author("Analog Hors"));
-                    send_message(UciMessage::UciOk);
                     send_message(UciMessage::Option(UciOptionConfig::Spin {
                         name: "Hash".to_owned(),
                         default: Some((transposition_table_size / MEGABYTE) as i64),
                         min: Some(0),
-                        max: None
+                        max: Some(64 * 1000) //64 Gigabytes
                     }));
+                    send_message(UciMessage::UciOk);
                 }
                 UciMessage::Debug(_) => {}
                 UciMessage::IsReady => send_message(UciMessage::ReadyOk),
