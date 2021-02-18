@@ -20,9 +20,18 @@ impl EngineSearch {
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
         max_depth: u8,
+        late_move_reduction: u8,
+        late_move_leeway: u8,
         think_time: Duration
     ) -> Self {
-        let info_channel = engine.begin_think(initial_pos, moves, transposition_table_size, max_depth);
+        let info_channel = engine.begin_think(
+            initial_pos, 
+            moves,
+            transposition_table_size,
+            max_depth,
+            late_move_reduction,
+            late_move_leeway
+        );
         Self {
             start: Instant::now(),
             think_time,
@@ -68,6 +77,8 @@ fn main() {
     let mut search = None;
     const MEGABYTE: usize = 1000_000;
     let mut transposition_table_size = 4 * MEGABYTE;
+    let mut late_move_reduction = 1;
+    let mut late_move_leeway = 3;
 
     let (messages_send, messages) = channel();
     std::thread::spawn(move || {
@@ -89,6 +100,18 @@ fn main() {
                         min: Some(0),
                         max: Some(64 * 1000) //64 Gigabytes
                     }));
+                    send_message(UciMessage::Option(UciOptionConfig::Spin {
+                        name: "Late Move Reduction".to_owned(),
+                        default: Some(late_move_reduction as i64),
+                        min: Some(0),
+                        max: Some(u8::MAX as i64)
+                    }));
+                    send_message(UciMessage::Option(UciOptionConfig::Spin {
+                        name: "Late Move Leeway".to_owned(),
+                        default: Some(late_move_leeway as i64),
+                        min: Some(0),
+                        max: Some(u8::MAX as i64)
+                    }));
                     send_message(UciMessage::UciOk);
                 }
                 UciMessage::Debug(_) => {}
@@ -100,6 +123,18 @@ fn main() {
                             .parse::<usize>()
                             .unwrap()
                             * MEGABYTE
+                    },
+                    "Late Move Reduction" => {
+                        late_move_reduction = value
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                    },
+                    "Late Move Leeway" => {
+                        late_move_leeway = value
+                            .unwrap()
+                            .parse()
+                            .unwrap();
                     },
                     _ => {}
                 }
@@ -133,6 +168,8 @@ fn main() {
                         moves,
                         transposition_table_size,
                         max_depth,
+                        late_move_reduction,
+                        late_move_leeway,
                         think_time
                     ));
                 }

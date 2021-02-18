@@ -26,6 +26,8 @@ enum LunaticContextCommand {
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
         max_depth: u8,
+        late_move_reduction: u8,
+        late_move_leeway: u8,
         info_channel: mpsc::Sender<SearchInfo>
     },
     EndThink(oneshot::Sender<Option<ChessMove>>)
@@ -46,6 +48,8 @@ impl LunaticContext {
                     moves,
                     transposition_table_size,
                     max_depth,
+                    late_move_reduction,
+                    late_move_leeway,
                     info_channel
                 } = command {
                     let mut game_history = Vec::with_capacity(100);
@@ -79,7 +83,9 @@ impl LunaticContext {
                                 &board,
                                 &mut game_history,
                                 depth_since_zeroing,
-                                depth as u8
+                                depth as u8,
+                                late_move_reduction,
+                                late_move_leeway
                             );
                             if let Some((m, info)) = search {
                                 mv = Some(m);
@@ -110,7 +116,9 @@ impl LunaticContext {
         initial_pos: Board,
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
-        max_depth: u8
+        max_depth: u8,
+        late_move_reduction: u8,
+        late_move_leeway: u8
     ) -> mpsc::Receiver<SearchInfo> {
         let (info_channel, info_channel_recv) = mpsc::channel();
         self.thinker.send(LunaticContextCommand::BeginThink {
@@ -118,6 +126,8 @@ impl LunaticContext {
             moves,
             transposition_table_size,
             max_depth,
+            late_move_reduction,
+            late_move_leeway,
             info_channel
         }).unwrap();
         info_channel_recv

@@ -19,6 +19,7 @@ pub struct LunaticSearchState {
     killer_table: Vec<KillerTableEntry>,
 }
 
+///Does this move reset the 50 move rule?
 pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
     // The only capturing move that doesn't move to the captured piece's square
     // is en passant, which is a pawn move and zeroes anyway
@@ -26,8 +27,8 @@ pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
     board.piece_on(mv.get_dest()).is_some()
 }
 
+///No captures or promotions
 pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
-    //No captures or promotions
     child_board.combined().popcnt() == board.combined().popcnt() &&
     child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
 }
@@ -99,7 +100,10 @@ impl LunaticSearchState {
         game_history: &mut Vec<u64>,
         // Zeroing means a move that resets the 50 move rule counter and represents an irreversible move.
         depth_since_zeroing: u8,
-        max_depth: u8
+        max_depth: u8,
+        late_move_reduction: u8,
+        //TODO "late move leeway" is a pretty terrible identifier
+        late_move_leeway: u8
     ) -> Option<(ChessMove, SearchInfo)> {
         let mut nodes = 0;
         self.search_position::<BestMove, E>(
@@ -110,6 +114,8 @@ impl LunaticSearchState {
                 0,
                 depth_since_zeroing,
                 max_depth,
+                late_move_reduction,
+                late_move_leeway,
                 -Evaluation::INFINITY,
                 Evaluation::INFINITY
             )
@@ -158,6 +164,8 @@ impl LunaticSearchState {
         depth: u8,
         depth_since_zeroing: u8,
         max_depth: u8,
+        late_move_reduction: u8,
+        late_move_leeway: u8,
         mut alpha: Evaluation,
         mut beta: Evaluation
     ) -> T::Output {
@@ -203,25 +211,46 @@ impl LunaticSearchState {
             let mut value = -Evaluation::INFINITY;
             let mut best_move = None;
             let killer_move = self.killer_table[depth as usize].clone();
-            for mv in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board) {
+            let in_check = *board.checkers() != EMPTY;
+            for (i, mv) in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board).enumerate() {
                 let child_board = board.make_move_new(mv);
+                let quiet = move_is_quiet(&board, &child_board);
+                let gives_check = *child_board.checkers() != EMPTY;
+                let max_depth = max_depth;
                 let depth_since_zeroing = if move_zeroes(mv, board) {
                     1
                 } else {
                     depth_since_zeroing + 1
                 };
+                let mut reduced_max_depth = max_depth;
+                if i as u8 > late_move_leeway && subtree_depth > 3 &&
+                   quiet && !in_check && !gives_check {
+                    reduced_max_depth = max_depth.saturating_sub(late_move_reduction);
+                }
                 game_history.push(child_board.get_hash());
-                let child_value = -self.search_position::<PositionEvaluation, E>(
-                    evaluator,
-                    &child_board,
-                    game_history,
-                    node_count,
-                    depth + 1,
-                    depth_since_zeroing,
-                    max_depth,
-                    -beta,
-                    -alpha
-                );
+                let mut child_value;
+                loop {
+                    child_value = -self.search_position::<PositionEvaluation, E>(
+                        evaluator,
+                        &child_board,
+                        game_history,
+                        node_count,
+                        depth + 1,
+                        depth_since_zeroing,
+                        reduced_max_depth,
+                        late_move_reduction,
+                        late_move_leeway,
+                        -beta,
+                        -alpha
+                    );
+                    //If it was searched to a reduced depth and it
+                    //increased alpha, search again with full depth
+                    if reduced_max_depth < max_depth && child_value > alpha {
+                        reduced_max_depth = max_depth;
+                        continue;
+                    }
+                    break;
+                }
                 game_history.pop();
                 if child_value > value {
                     value = child_value;
@@ -229,7 +258,7 @@ impl LunaticSearchState {
                 }
                 alpha = alpha.max(value);
                 if alpha >= beta {
-                    if move_is_quiet(&board, &child_board) {
+                    if quiet {
                         self.killer_table[depth as usize].push_back(mv);
                     }
                     break;
