@@ -125,7 +125,7 @@ impl Default for StandardEvaluator {
 }
 
 impl Evaluator for StandardEvaluator {
-    fn evaluate(&self, board: &Board, depth: u8) -> Evaluation {
+    fn evaluate(&self, board: &Board, ply_index: u8) -> Evaluation {
         match board.status() {
             BoardStatus::Ongoing => {
                 let phase = Self::game_phase(&board);
@@ -137,7 +137,7 @@ impl Evaluator for StandardEvaluator {
                     black - white
                 })
             },
-            BoardStatus::Checkmate => Evaluation::mated_in(depth),
+            BoardStatus::Checkmate => Evaluation::mated_in(ply_index),
             BoardStatus::Stalemate => Evaluation::DRAW
         }
     }

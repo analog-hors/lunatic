@@ -14,7 +14,7 @@ pub struct TableEntry {
     pub kind: TableEntryKind,
     pub value: Evaluation,
     ///Remaining depth to max depth (the size of the subtree)
-    pub subtree_depth: u8,
+    pub depth: u8,
     pub best_move: ChessMove
 }
 
@@ -56,7 +56,7 @@ impl TranspositionTable {
         let mask = self.0.len() - 1;
         let old = &mut self.0[hash as usize & mask];
         if let Some(old) = old {
-            if old.1.subtree_depth < entry.subtree_depth {
+            if old.1.depth < entry.depth {
                 *old = (hash, entry);
             }
         } else {

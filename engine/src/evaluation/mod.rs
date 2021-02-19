@@ -107,5 +107,5 @@ impl std::ops::Neg for Evaluation {
 }
 
 pub trait Evaluator {
-    fn evaluate(&self, board: &chess::Board, depth: u8) -> Evaluation;
+    fn evaluate(&self, board: &chess::Board, ply_index: u8) -> Evaluation;
 }

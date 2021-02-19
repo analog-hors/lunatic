@@ -19,8 +19,7 @@ pub struct LunaticSearchState {
     killer_table: Vec<KillerTableEntry>,
 }
 
-///Does this move reset the 50 move rule?
-pub(crate) fn move_zeroes(mv: ChessMove, board: &Board) -> bool {
+pub(crate) fn move_resets_fifty_move_rule(mv: ChessMove, board: &Board) -> bool {
     // The only capturing move that doesn't move to the captured piece's square
     // is en passant, which is a pawn move and zeroes anyway
     board.piece_on(mv.get_source()) == Some(Piece::Pawn) ||
@@ -33,18 +32,18 @@ pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
     child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
 }
 
-fn draw_by_move_rule(board: &Board, game_history: &[u64], depth_since_zeroing: u8) -> bool {
+fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) -> bool {
     //Fifty move rule
-    if depth_since_zeroing >= 100 {
+    if halfmove_clock >= 100 {
         return true;
     }
 
     //Threefold repetition
-    if depth_since_zeroing >= 6 {
+    if halfmove_clock >= 6 {
         let repetitions = game_history
             .iter()
             .rev()
-            .take(depth_since_zeroing as usize)
+            .take(halfmove_clock as usize)
             .step_by(2) // Every second ply so it's our turn
             .filter(|&&hash| hash == board.get_hash())
             .count();
@@ -98,9 +97,8 @@ impl LunaticSearchState {
         evaluator: &E,
         board: &Board,
         game_history: &mut Vec<u64>,
-        // Zeroing means a move that resets the 50 move rule counter and represents an irreversible move.
-        depth_since_zeroing: u8,
-        max_depth: u8,
+        halfmove_clock: u8,
+        depth: u8,
         late_move_reduction: u8,
         //TODO "late move leeway" is a pretty terrible identifier
         late_move_leeway: u8
@@ -111,9 +109,9 @@ impl LunaticSearchState {
                 board,
                 game_history,
                 &mut nodes,
+                depth,
                 0,
-                depth_since_zeroing,
-                max_depth,
+                halfmove_clock,
                 late_move_reduction,
                 late_move_leeway,
                 -Evaluation::INFINITY,
@@ -122,20 +120,20 @@ impl LunaticSearchState {
             .map(|(mv, value)| {
                 let mut principal_variation = Vec::new();
                 let mut board = *board;
-                let mut depth_since_zeroing = depth_since_zeroing;
+                let mut halfmove_clock = halfmove_clock;
 
                 let mut next_move = Some(mv);
                 while let Some(mv) = next_move.take() {
                     principal_variation.push(mv);
                     game_history.push(board.get_hash());
-                    depth_since_zeroing = if move_zeroes(mv, &board) {
+                    halfmove_clock = if move_resets_fifty_move_rule(mv, &board) {
                         1
                     } else {
-                        depth_since_zeroing + 1
+                        halfmove_clock + 1
                     };
                     board = board.make_move_new(mv);
 
-                    next_move = if draw_by_move_rule(&board, game_history, depth_since_zeroing) {
+                    next_move = if draw_by_move_rule(&board, game_history, halfmove_clock) {
                         None
                     } else {
                         self.transposition_table.get(&board).map(|e| e.best_move)
@@ -148,7 +146,7 @@ impl LunaticSearchState {
                 let info = SearchInfo {
                     value,
                     nodes,
-                    depth: max_depth,
+                    depth,
                     principal_variation
                 };
                 (mv, info)
@@ -162,8 +160,8 @@ impl LunaticSearchState {
         game_history: &mut Vec<u64>,
         node_count: &mut u32,
         depth: u8,
-        depth_since_zeroing: u8,
-        max_depth: u8,
+        ply_index: u8,
+        halfmove_clock: u8,
         late_move_reduction: u8,
         late_move_leeway: u8,
         mut alpha: Evaluation,
@@ -171,16 +169,15 @@ impl LunaticSearchState {
     ) -> T::Output {
         *node_count += 1;
 
-        if draw_by_move_rule(board, game_history, depth_since_zeroing) {
+        if draw_by_move_rule(board, game_history, halfmove_clock) {
             return T::convert(|| Evaluation::DRAW, None);
         }
 
-        let subtree_depth = max_depth - depth;
         let original_alpha = alpha;
         
         if let Some(entry) = self.transposition_table.get(&board) {
             //Larger subtree means deeper search
-            if entry.subtree_depth >= subtree_depth {
+            if entry.depth >= depth {
                 match entry.kind {
                     TableEntryKind::Exact => return T::convert(|| entry.value, Some(entry.best_move)),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
@@ -191,7 +188,7 @@ impl LunaticSearchState {
                 }
             }
         }
-        if depth >= max_depth || board.status() != BoardStatus::Ongoing {
+        if depth == 0 || board.status() != BoardStatus::Ongoing {
             T::convert(
                 || {
                     self.quiescence_search(
@@ -199,8 +196,8 @@ impl LunaticSearchState {
                         board,
                         game_history,
                         node_count,
-                        depth,
-                        depth_since_zeroing,
+                        ply_index,
+                        halfmove_clock,
                         alpha,
                         beta
                     )
@@ -210,22 +207,21 @@ impl LunaticSearchState {
         } else {
             let mut value = -Evaluation::INFINITY;
             let mut best_move = None;
-            let killer_move = self.killer_table[depth as usize].clone();
+            let killer_move = self.killer_table[ply_index as usize].clone();
             let in_check = *board.checkers() != EMPTY;
             for (i, mv) in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board).enumerate() {
                 let child_board = board.make_move_new(mv);
                 let quiet = move_is_quiet(&board, &child_board);
                 let gives_check = *child_board.checkers() != EMPTY;
-                let max_depth = max_depth;
-                let depth_since_zeroing = if move_zeroes(mv, board) {
+                let halfmove_clock = if move_resets_fifty_move_rule(mv, board) {
                     1
                 } else {
-                    depth_since_zeroing + 1
+                    halfmove_clock + 1
                 };
-                let mut reduced_max_depth = max_depth;
-                if i as u8 > late_move_leeway && subtree_depth > 3 &&
+                let mut reduced_depth = depth;
+                if i as u8 > late_move_leeway && depth > 3 &&
                    quiet && !in_check && !gives_check {
-                    reduced_max_depth = max_depth.saturating_sub(late_move_reduction);
+                    reduced_depth = depth.saturating_sub(late_move_reduction);
                 }
                 game_history.push(child_board.get_hash());
                 let mut child_value;
@@ -235,9 +231,9 @@ impl LunaticSearchState {
                         &child_board,
                         game_history,
                         node_count,
-                        depth + 1,
-                        depth_since_zeroing,
-                        reduced_max_depth,
+                        depth - 1,
+                        ply_index + 1,
+                        halfmove_clock,
                         late_move_reduction,
                         late_move_leeway,
                         -beta,
@@ -245,21 +241,21 @@ impl LunaticSearchState {
                     );
                     //If it was searched to a reduced depth and it
                     //increased alpha, search again with full depth
-                    if reduced_max_depth < max_depth && child_value > alpha {
-                        reduced_max_depth = max_depth;
+                    if reduced_depth < depth && child_value > alpha {
+                        reduced_depth = depth;
                         continue;
                     }
                     break;
                 }
                 game_history.pop();
-                if child_value > value {
+                if child_value > value || best_move.is_none() {
                     value = child_value;
                     best_move = Some(mv);
                 }
                 alpha = alpha.max(value);
                 if alpha >= beta {
                     if quiet {
-                        self.killer_table[depth as usize].push_back(mv);
+                        self.killer_table[ply_index as usize].push_back(mv);
                     }
                     break;
                 }
@@ -274,7 +270,7 @@ impl LunaticSearchState {
                         _ => TableEntryKind::Exact
                     },
                     value,
-                    subtree_depth,
+                    depth,
                     best_move
                 }
             );
@@ -288,14 +284,14 @@ impl LunaticSearchState {
         board: &Board,
         game_history: &mut Vec<u64>,
         node_count: &mut u32,
-        depth: u8,
-        depth_since_zeroing: u8,
+        ply_index: u8,
+        halfmove_clock: u8,
         mut alpha: Evaluation,
         beta: Evaluation
     ) -> Evaluation {
         *node_count += 1;
 
-        if draw_by_move_rule(board, game_history, depth_since_zeroing) {
+        if draw_by_move_rule(board, game_history, halfmove_clock) {
             return Evaluation::DRAW;
         }
 
@@ -305,7 +301,7 @@ impl LunaticSearchState {
         //move that matches or is better than the value, so we didn't
         //*necessarily* have to play this line and it's *probably* at
         //least that value.
-        let stand_pat = evaluator.evaluate(board, depth);
+        let stand_pat = evaluator.evaluate(board, ply_index);
         if stand_pat > beta {
             return beta;
         }
@@ -317,10 +313,10 @@ impl LunaticSearchState {
         captures.set_iterator_mask(*board.combined());
         for mv in captures {
             let child_board = board.make_move_new(mv);
-            let depth_since_zeroing = if move_zeroes(mv, board) {
+            let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
                 1
             } else {
-                depth_since_zeroing + 1
+                halfmove_clock + 1
             };
             game_history.push(child_board.get_hash());
             let child_value = -self.quiescence_search(
@@ -328,7 +324,7 @@ impl LunaticSearchState {
                 &child_board,
                 game_history,
                 node_count,
-                depth + 1,
+                ply_index + 1,
                 depth_since_zeroing,
                 -beta,
                 -alpha

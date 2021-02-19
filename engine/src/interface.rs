@@ -56,7 +56,7 @@ impl LunaticContext {
                     let mut board = initial_pos;
                     game_history.push(board.get_hash());
                     for mv in moves {
-                        if crate::engine::move_zeroes(mv, &board) {
+                        if crate::engine::move_resets_fifty_move_rule(mv, &board) {
                             game_history.clear();
                         }
                         board = board.make_move_new(mv);
