@@ -1,5 +1,6 @@
 use chess::*;
 use arraydeque::ArrayDeque;
+use serde::{Serialize, Deserialize};
 
 use crate::evaluation::{Evaluation, Evaluator};
 use crate::table::*;
@@ -84,6 +85,24 @@ impl SearchReturnType for PositionEvaluation {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchOptions {
+    ///How many plies the search is reduced by for a likely bad move
+    pub late_move_reduction: u8,
+    //TODO "late move leeway" is a pretty terrible identifier
+    ///The number of moves explored before late move reduction kicks in
+    pub late_move_leeway: u8
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            late_move_reduction: 1,
+            late_move_leeway: 3
+        }
+    }
+}
+
 impl LunaticSearchState {
     pub fn new(transposition_table_size: usize, killer_table_size: usize) -> Self {
         Self {
@@ -99,9 +118,7 @@ impl LunaticSearchState {
         game_history: &mut Vec<u64>,
         halfmove_clock: u8,
         depth: u8,
-        late_move_reduction: u8,
-        //TODO "late move leeway" is a pretty terrible identifier
-        late_move_leeway: u8
+        options: &SearchOptions,
     ) -> Option<(ChessMove, SearchInfo)> {
         let mut nodes = 0;
         self.search_position::<BestMove, E>(
@@ -112,8 +129,7 @@ impl LunaticSearchState {
                 depth,
                 0,
                 halfmove_clock,
-                late_move_reduction,
-                late_move_leeway,
+                options,
                 -Evaluation::INFINITY,
                 Evaluation::INFINITY
             )
@@ -162,8 +178,7 @@ impl LunaticSearchState {
         depth: u8,
         ply_index: u8,
         halfmove_clock: u8,
-        late_move_reduction: u8,
-        late_move_leeway: u8,
+        options: &SearchOptions,
         mut alpha: Evaluation,
         mut beta: Evaluation
     ) -> T::Output {
@@ -219,9 +234,9 @@ impl LunaticSearchState {
                     halfmove_clock + 1
                 };
                 let mut reduced_depth = depth;
-                if i as u8 > late_move_leeway && depth > 3 &&
+                if i as u8 > options.late_move_leeway && depth > 3 &&
                    quiet && !in_check && !gives_check {
-                    reduced_depth = depth.saturating_sub(late_move_reduction);
+                    reduced_depth = depth.saturating_sub(options.late_move_reduction);
                 }
                 game_history.push(child_board.get_hash());
                 let mut child_value;
@@ -234,8 +249,7 @@ impl LunaticSearchState {
                         depth - 1,
                         ply_index + 1,
                         halfmove_clock,
-                        late_move_reduction,
-                        late_move_leeway,
+                        options,
                         -beta,
                         -alpha
                     );

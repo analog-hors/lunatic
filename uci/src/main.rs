@@ -6,6 +6,7 @@ use chess::*;
 use vampirc_uci::{Duration, UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::*;
 use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
+use lunatic::engine::SearchOptions;
 
 struct EngineSearch {
     start: Instant,
@@ -20,8 +21,7 @@ impl EngineSearch {
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
         max_depth: u8,
-        late_move_reduction: u8,
-        late_move_leeway: u8,
+        options: SearchOptions,
         think_time: Duration
     ) -> Self {
         let info_channel = engine.begin_think(
@@ -29,8 +29,7 @@ impl EngineSearch {
             moves,
             transposition_table_size,
             max_depth,
-            late_move_reduction,
-            late_move_leeway
+            options
         );
         Self {
             start: Instant::now(),
@@ -77,8 +76,7 @@ fn main() {
     let mut search = None;
     const MEGABYTE: usize = 1000_000;
     let mut transposition_table_size = 4 * MEGABYTE;
-    let mut late_move_reduction = 1;
-    let mut late_move_leeway = 3;
+    let mut search_options = SearchOptions::default();
 
     let (messages_send, messages) = channel();
     std::thread::spawn(move || {
@@ -102,13 +100,13 @@ fn main() {
                     }));
                     send_message(UciMessage::Option(UciOptionConfig::Spin {
                         name: "Late Move Reduction".to_owned(),
-                        default: Some(late_move_reduction as i64),
+                        default: Some(search_options.late_move_reduction as i64),
                         min: Some(0),
                         max: Some(u8::MAX as i64)
                     }));
                     send_message(UciMessage::Option(UciOptionConfig::Spin {
                         name: "Late Move Leeway".to_owned(),
-                        default: Some(late_move_leeway as i64),
+                        default: Some(search_options.late_move_leeway as i64),
                         min: Some(0),
                         max: Some(u8::MAX as i64)
                     }));
@@ -125,13 +123,13 @@ fn main() {
                             * MEGABYTE
                     },
                     "Late Move Reduction" => {
-                        late_move_reduction = value
+                        search_options.late_move_reduction = value
                             .unwrap()
                             .parse()
                             .unwrap();
                     },
                     "Late Move Leeway" => {
-                        late_move_leeway = value
+                        search_options.late_move_leeway = value
                             .unwrap()
                             .parse()
                             .unwrap();
@@ -168,8 +166,7 @@ fn main() {
                         moves,
                         transposition_table_size,
                         max_depth,
-                        late_move_reduction,
-                        late_move_leeway,
+                        search_options.clone(),
                         think_time
                     ));
                 }

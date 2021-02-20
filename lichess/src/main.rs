@@ -11,6 +11,7 @@ use chess::*;
 use chess_polyglot_reader::{PolyglotReader, PolyglotKey};
 
 use lunatic::evaluation::StandardEvaluator;
+use lunatic::engine::SearchOptions;
 use lunatic::*;
 
 mod api;
@@ -26,8 +27,7 @@ struct Settings {
     think_time: u64,
     transposition_table_size: usize,
     max_depth: u8,
-    late_move_reduction: u8,
-    late_move_leeway: u8,
+    search_options: SearchOptions,
     engine_settings: LunaticContextSettings<StandardEvaluator>,
     opening_book: Option<String>,
     opening_book_weight_multiplier: u16
@@ -40,8 +40,7 @@ impl Default for Settings {
             think_time: 5,
             transposition_table_size: 4_000_000,
             max_depth: 64,
-            late_move_reduction: 1,
-            late_move_leeway: 3,
+            search_options: SearchOptions::default(),
             engine_settings: LunaticContextSettings::default(),
             opening_book: None,
             opening_book_weight_multiplier: 1
@@ -181,8 +180,7 @@ impl ChessSession {
                 moves,
                 self.settings.transposition_table_size,
                 self.settings.max_depth,
-                self.settings.late_move_reduction,
-                self.settings.late_move_leeway
+                self.settings.search_options.clone()
             );
             let now = Instant::now();
             while now.elapsed().as_secs() < self.settings.think_time {
