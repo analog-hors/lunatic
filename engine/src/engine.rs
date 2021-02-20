@@ -91,14 +91,20 @@ pub struct SearchOptions {
     pub late_move_reduction: u8,
     //TODO "late move leeway" is a pretty terrible identifier
     ///The number of moves explored before late move reduction kicks in
-    pub late_move_leeway: u8
+    pub late_move_leeway: u8,
+    ///Enable null move pruning?
+    pub null_move_pruning: bool,
+    ///The number of plies the null move pruning search is reduced by
+    pub null_move_reduction: u8
 }
 
 impl Default for SearchOptions {
     fn default() -> Self {
         Self {
             late_move_reduction: 1,
-            late_move_leeway: 3
+            late_move_leeway: 3,
+            null_move_pruning: true,
+            null_move_reduction: 2
         }
     }
 }
@@ -224,6 +230,34 @@ impl LunaticSearchState {
             let mut best_move = None;
             let killer_move = self.killer_table[ply_index as usize].clone();
             let in_check = *board.checkers() != EMPTY;
+            let ally_pieces = *board.color_combined(board.side_to_move());
+            let sliding_pieces = 
+                *board.pieces(Piece::Rook) |
+                *board.pieces(Piece::Bishop) |
+                *board.pieces(Piece::Queen);
+
+            //If I have at least one sliding piece...
+            if options.null_move_pruning && ally_pieces & sliding_pieces != EMPTY {
+                if let Some(child_board) = board.null_move() {
+                    game_history.push(child_board.get_hash());
+                    let child_value = -self.search_position::<PositionEvaluation, E>(
+                        evaluator,
+                        &child_board,
+                        game_history,
+                        node_count,
+                        depth.saturating_sub(options.null_move_reduction),
+                        ply_index + 1,
+                        halfmove_clock + 1,
+                        options,
+                        -beta,
+                        -alpha
+                    );
+                    game_history.pop();
+                    if child_value >= beta {
+                        return T::convert(|| beta, None);
+                    }
+                }
+            }
             for (i, mv) in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board).enumerate() {
                 let child_board = board.make_move_new(mv);
                 let quiet = move_is_quiet(&board, &child_board);

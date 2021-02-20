@@ -110,6 +110,16 @@ fn main() {
                         min: Some(0),
                         max: Some(u8::MAX as i64)
                     }));
+                    send_message(UciMessage::Option(UciOptionConfig::Check {
+                        name: "Null Move Pruning".to_owned(),
+                        default: Some(search_options.null_move_pruning)
+                    }));
+                    send_message(UciMessage::Option(UciOptionConfig::Spin {
+                        name: "Null Move Reduction".to_owned(),
+                        default: Some(search_options.null_move_reduction as i64),
+                        min: Some(0),
+                        max: Some(u8::MAX as i64)
+                    }));
                     send_message(UciMessage::UciOk);
                 }
                 UciMessage::Debug(_) => {}
@@ -121,19 +131,31 @@ fn main() {
                             .parse::<usize>()
                             .unwrap()
                             * MEGABYTE
-                    },
+                    }
                     "Late Move Reduction" => {
                         search_options.late_move_reduction = value
                             .unwrap()
                             .parse()
                             .unwrap();
-                    },
+                    }
                     "Late Move Leeway" => {
                         search_options.late_move_leeway = value
                             .unwrap()
                             .parse()
                             .unwrap();
-                    },
+                    }
+                    "Null Move Pruning" => {
+                        search_options.null_move_pruning = value
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                    }
+                    "Null Move Reduction" => {
+                        search_options.null_move_reduction = value
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                    }
                     _ => {}
                 }
                 UciMessage::UciNewGame => {}
