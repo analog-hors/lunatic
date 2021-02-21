@@ -109,12 +109,13 @@ impl Iterator for SortedMoveGenerator {
             }
         }
 
-        if let Some(mv) = captures.next() {
-            //Losing capture
-            return Some(mv.mv);
+        if let Some(mv) = self.moves.next() {
+            //Quiet move
+            return Some(mv);
         }
 
-        self.moves.next()
+        //Losing capture
+        captures.next().map(|mv| mv.mv)
     }
 }
 
@@ -129,4 +130,26 @@ impl SortedMoveGenerator {
             moves: MoveGen::new_legal(&board)
         }
     }
+}
+
+pub fn quiescence_move_generator(board: &Board) -> impl Iterator<Item=ChessMove> {
+    //Chess branching factor is ~35
+    let mut mvv_lva_moves = Vec::with_capacity(40);
+    let mut captures = MoveGen::new_legal(board);
+    //TODO excludes en-passant, does this matter?
+    captures.set_iterator_mask(*board.combined());
+    for mv in captures {
+        let victim = board
+            .piece_on(mv.get_dest())
+            .unwrap_or(Piece::Pawn); // en passant
+        let attacker = board
+            .piece_on(mv.get_source())
+            .unwrap();
+        mvv_lva_moves.push(MvvLvaMove {
+            victim,
+            attacker,
+            mv
+        });
+    }
+    MaxSelectionSorter(mvv_lva_moves).map(|mv| mv.mv)
 }

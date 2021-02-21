@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::evaluation::{Evaluation, Evaluator};
 use crate::table::*;
-use crate::moves::SortedMoveGenerator;
+use crate::moves::*;
 
 #[derive(Debug, Clone)]
 pub struct SearchInfo {
@@ -356,10 +356,7 @@ impl LunaticSearchState {
         if alpha < stand_pat {
             alpha = stand_pat;
         }
-        let mut captures = MoveGen::new_legal(board);
-        //TODO excludes en-passant, does this matter?
-        captures.set_iterator_mask(*board.combined());
-        for mv in captures {
+        for mv in quiescence_move_generator(&board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
                 1
