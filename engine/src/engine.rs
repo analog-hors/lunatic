@@ -40,15 +40,19 @@ fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) ->
     }
 
     //Threefold repetition
-    if halfmove_clock >= 6 {
-        let repetitions = game_history
+    //Two plies for a move, one extra accounting for the current board
+    if halfmove_clock >= 2 + 1 {
+        //Any repetition means a loop where the best move involves repeating moves, so
+        //the first repetition is immediately a draw. No point playing out three repetitions.
+
+        let threefold = game_history
             .iter()
             .rev()
             .take(halfmove_clock as usize)
+            .skip(1) // Skip our board
             .step_by(2) // Every second ply so it's our turn
-            .filter(|&&hash| hash == board.get_hash())
-            .count();
-        if repetitions >= 3 {
+            .any(|&hash| hash == board.get_hash());
+        if threefold {
             return true;
         }
     }
@@ -146,14 +150,14 @@ impl LunaticSearchState {
 
                 let mut next_move = Some(mv);
                 while let Some(mv) = next_move.take() {
-                    principal_variation.push(mv);
-                    game_history.push(board.get_hash());
                     halfmove_clock = if move_resets_fifty_move_rule(mv, &board) {
                         1
                     } else {
                         halfmove_clock + 1
                     };
                     board = board.make_move_new(mv);
+                    principal_variation.push(mv);
+                    game_history.push(board.get_hash());
 
                     next_move = if draw_by_move_rule(&board, game_history, halfmove_clock) {
                         None
