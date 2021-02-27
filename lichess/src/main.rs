@@ -62,11 +62,14 @@ enum ClientMoveInfo {
     Book(u16)
 }
 
-fn print_info(iter: impl Iterator<Item=SearchInfo>) {
-    for info in iter {
+fn print_info(iter: impl Iterator<Item=(SearchInfo, Duration)>) {
+    for (info, time) in iter {
+        let time = time.as_secs_f32();
+        println!("Time: {:.1}", time);
         println!("Value: {}", info.value);
         println!("Depth: {}", info.depth);
         println!("Nodes: {}", info.nodes);
+        println!("NPS: {:.2}k", info.nodes as f32 / 1000.0 / time);
         print!("PV:");
         for mv in info.principal_variation {
             print!(" {}", mv);
@@ -184,6 +187,7 @@ impl ChessSession {
             );
             let now = Instant::now();
             while now.elapsed().as_secs() < self.settings.think_time {
+                tokio::time::delay_for(Duration::from_millis(500)).await;
                 print_info(info_stream.try_iter());
             }
             let engine_mv = self.engine.end_think().await.unwrap().unwrap();

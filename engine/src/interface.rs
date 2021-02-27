@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use chess::*;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use futures::channel::oneshot;
 
 use crate::evaluation::*;
@@ -27,7 +28,7 @@ enum LunaticContextCommand {
         transposition_table_size: usize,
         max_depth: u8,
         options: SearchOptions,
-        info_channel: mpsc::Sender<SearchInfo>
+        info_channel: mpsc::Sender<(SearchInfo, Duration)>
     },
     EndThink(oneshot::Sender<Option<ChessMove>>)
 }
@@ -50,6 +51,7 @@ impl LunaticContext {
                     options,
                     info_channel
                 } = command {
+                    let search_start_time = Instant::now();
                     let mut game_history = Vec::with_capacity(100);
                     let mut board = initial_pos;
                     game_history.push(board.get_hash());
@@ -60,7 +62,7 @@ impl LunaticContext {
                         board = board.make_move_new(mv);
                         game_history.push(board.get_hash());
                     }
-                    let depth_since_zeroing = game_history.len() as u8;
+                    let halfmove_clock = game_history.len() as u8;
                     
                     let mut search = LunaticSearchState::new(
                         transposition_table_size,
@@ -80,13 +82,13 @@ impl LunaticContext {
                                 &settings.evaluator,
                                 &board,
                                 &mut game_history,
-                                depth_since_zeroing,
+                                halfmove_clock,
                                 depth as u8,
                                 &options
                             );
                             if let Some((m, info)) = search {
                                 mv = Some(m);
-                                let _ = info_channel.send(info);
+                                let _ = info_channel.send((info, search_start_time.elapsed()));
                             }
                             depth += 1;
                             match thinker_recv.try_recv() {
@@ -115,7 +117,7 @@ impl LunaticContext {
         transposition_table_size: usize,
         max_depth: u8,
         options: SearchOptions
-    ) -> mpsc::Receiver<SearchInfo> {
+    ) -> mpsc::Receiver<(SearchInfo, Duration)> {
         let (info_channel, info_channel_recv) = mpsc::channel();
         self.thinker.send(LunaticContextCommand::BeginThink {
             initial_pos,
