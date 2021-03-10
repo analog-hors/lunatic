@@ -10,12 +10,27 @@ use lunatic::engine::SearchOptions;
 struct EngineSearch {
     start: Instant,
     think_time: Duration,
-    info_channel: std::sync::mpsc::Receiver<(SearchInfo, Duration)>
+    search_stream: std::sync::mpsc::Receiver<(SearchResult, Duration)>,
+    search_request: SearchRequest
 }
 
 fn send_message(message: UciMessage) {
     println!("{}", message);
     std::io::stdout().flush().unwrap();
+}
+
+fn send_info(info: SearchResult, time: Duration) {
+    send_message(UciMessage::Info(vec![
+        match info.value.kind() {
+            EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
+            EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
+            EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
+        },
+        UciInfoAttribute::Depth(info.depth as u8),
+        UciInfoAttribute::Nodes(info.nodes as u64),
+        UciInfoAttribute::Pv(info.principal_variation),
+        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(time).unwrap())
+    ]));
 }
 
 fn main() {
@@ -133,17 +148,20 @@ fn main() {
                             //TODO implement the rest
                         }
                         let (initial_pos, moves) = position.take().unwrap();
-                        
-                        search = Some(EngineSearch {
-                            start: Instant::now(),
-                            think_time,
-                            info_channel: engine.begin_think(
+                        let (info_channel, search_request) =
+                            engine.begin_think(
                                 initial_pos, 
                                 moves,
                                 transposition_table_size,
                                 max_depth,
                                 search_options.clone()
-                            )
+                            );
+
+                        search = Some(EngineSearch {
+                            start: Instant::now(),
+                            think_time,
+                            search_stream: info_channel,
+                            search_request
                         });
                     }
                     UciMessage::Stop => end_search = true,
@@ -161,34 +179,24 @@ fn main() {
         }
         
         if let Some(s) = &mut search {
-            let mut best_move = None;
-
             if s.start.elapsed() > s.think_time {
                 end_search = true;
             }
             if end_search {
-                let mv = futures::executor::block_on(engine.end_think())
+                let mut search = search.take().unwrap();
+                let mv = search.search_request
+                    .terminate()
                     .unwrap()
-                    .unwrap();
-                best_move = Some(mv);
-            }
-
-            for (info, time) in s.info_channel.try_iter() {
-                send_message(UciMessage::Info(vec![
-                    match info.value.kind() {
-                        EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
-                        EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
-                        EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
-                    },
-                    UciInfoAttribute::Depth(info.depth as u8),
-                    UciInfoAttribute::Nodes(info.nodes as u64),
-                    UciInfoAttribute::Pv(info.principal_variation),
-                    UciInfoAttribute::Time(vampirc_uci::Duration::from_std(time).unwrap())
-                ]));
-            }
-            if let Some(mv) = best_move {
+                    .0
+                    .mv;
+                for (info, time) in search.search_stream.try_iter() {
+                    send_info(info, time);
+                }
                 send_message(UciMessage::best_move(mv));
-                search = None;
+            } else {
+                for (info, time) in s.search_stream.try_iter() {
+                    send_info(info, time);
+                }
             }
         }
 

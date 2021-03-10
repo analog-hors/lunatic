@@ -62,7 +62,7 @@ enum ClientMoveInfo {
     Book(u16)
 }
 
-fn print_info(iter: impl Iterator<Item=(SearchInfo, Duration)>) {
+fn print_info(iter: impl Iterator<Item=(SearchResult, Duration)>) {
     for (info, time) in iter {
         let time = time.as_secs_f32();
         println!("Time: {:.1}", time);
@@ -178,19 +178,24 @@ impl ChessSession {
         }
         if mv.is_none() {
             let think_begin = Instant::now();
-            let info_stream = self.engine.begin_think(
-                initial_pos,
-                moves,
-                self.settings.transposition_table_size,
-                self.settings.max_depth,
-                self.settings.search_options.clone()
-            );
+            let (info_stream, mut request) =
+                self.engine.begin_think(
+                    initial_pos,
+                    moves,
+                    self.settings.transposition_table_size,
+                    self.settings.max_depth,
+                    self.settings.search_options.clone()
+                );
             let now = Instant::now();
             while now.elapsed().as_secs() < self.settings.think_time {
                 tokio::time::delay_for(Duration::from_millis(500)).await;
                 print_info(info_stream.try_iter());
             }
-            let engine_mv = self.engine.end_think().await.unwrap().unwrap();
+            let engine_mv = request
+                .terminate()
+                .unwrap()
+                .0
+                .mv;
             print_info(info_stream.try_iter());
             mv = Some((engine_mv, ClientMoveInfo::Engine(think_begin.elapsed())));
         }

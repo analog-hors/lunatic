@@ -1,13 +1,16 @@
 use chess::*;
 use arraydeque::ArrayDeque;
 use serde::{Serialize, Deserialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::evaluation::{Evaluation, Evaluator};
 use crate::table::*;
 use crate::moves::*;
 
 #[derive(Debug, Clone)]
-pub struct SearchInfo {
+pub struct SearchResult {
+    pub mv: ChessMove,
     pub value: Evaluation,
     pub nodes: u32,
     pub depth: u8,
@@ -113,6 +116,11 @@ impl Default for SearchOptions {
     }
 }
 
+pub enum SearchError {
+    NoMoves,
+    Terminated
+}
+
 impl LunaticSearchState {
     pub fn new(transposition_table_size: usize, killer_table_size: usize) -> Self {
         Self {
@@ -125,25 +133,34 @@ impl LunaticSearchState {
         &mut self,
         evaluator: &E,
         board: &Board,
-        game_history: &mut Vec<u64>,
+        game_history: &[u64],
         halfmove_clock: u8,
         depth: u8,
         options: &SearchOptions,
-    ) -> Option<(ChessMove, SearchInfo)> {
+        terminator: &Arc<AtomicBool>
+    ) -> Result<SearchResult, SearchError> {
         let mut nodes = 0;
-        self.search_position::<BestMove, E>(
+        let mut history = game_history.to_vec();
+        //Quiescence search
+        history.reserve(32);
+        let result = self.search_position::<BestMove, E>(
                 evaluator,
                 board,
-                game_history,
+                &mut history,
                 &mut nodes,
                 depth,
                 0,
                 halfmove_clock,
                 options,
                 -Evaluation::INFINITY,
-                Evaluation::INFINITY
-            )
-            .map(|(mv, value)| {
+                Evaluation::INFINITY,
+                terminator
+        );
+        //`search_position` may have trashed game_history.
+        history = game_history.to_vec();
+        
+        match result {
+            Ok(Some((mv, value))) => Ok({
                 let mut principal_variation = Vec::new();
                 let mut board = *board;
                 let mut halfmove_clock = halfmove_clock;
@@ -157,26 +174,29 @@ impl LunaticSearchState {
                     };
                     board = board.make_move_new(mv);
                     principal_variation.push(mv);
-                    game_history.push(board.get_hash());
+                    history.push(board.get_hash());
 
-                    next_move = if draw_by_move_rule(&board, game_history, halfmove_clock) {
+                    next_move = if draw_by_move_rule(&board, &history, halfmove_clock) {
                         None
                     } else {
                         self.transposition_table.get(&board).map(|e| e.best_move)
                     };
                 }
                 for _ in 0..principal_variation.len() {
-                    game_history.pop();
+                    history.pop();
                 }
                 
-                let info = SearchInfo {
+                SearchResult {
+                    mv,
                     value,
                     nodes,
                     depth,
                     principal_variation
-                };
-                (mv, info)
-            })
+                }
+            }),
+            Ok(None) => Err(SearchError::NoMoves),
+            Err(()) => Err(SearchError::Terminated)
+        }
     }
     
     fn search_position<T: SearchReturnType, E: Evaluator>(
@@ -190,12 +210,17 @@ impl LunaticSearchState {
         halfmove_clock: u8,
         options: &SearchOptions,
         mut alpha: Evaluation,
-        mut beta: Evaluation
-    ) -> T::Output {
+        mut beta: Evaluation,
+        terminator: &Arc<AtomicBool>
+    ) -> Result<T::Output, ()> {
+        if terminator.load(Ordering::Acquire) {
+            return Err(());
+        }
+
         *node_count += 1;
 
         if draw_by_move_rule(board, game_history, halfmove_clock) {
-            return T::convert(|| Evaluation::DRAW, None);
+            return Ok(T::convert(|| Evaluation::DRAW, None));
         }
 
         let original_alpha = alpha;
@@ -204,17 +229,17 @@ impl LunaticSearchState {
             //Larger subtree means deeper search
             if entry.depth >= depth {
                 match entry.kind {
-                    TableEntryKind::Exact => return T::convert(|| entry.value, Some(entry.best_move)),
+                    TableEntryKind::Exact => return Ok(T::convert(|| entry.value, Some(entry.best_move))),
                     TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
                     TableEntryKind::UpperBound => beta = beta.min(entry.value)
                 }
                 if alpha >= beta {
-                    return T::convert(|| entry.value, Some(entry.best_move));
+                    return Ok(T::convert(|| entry.value, Some(entry.best_move)));
                 }
             }
         }
         if depth == 0 || board.status() != BoardStatus::Ongoing {
-            T::convert(
+            Ok(T::convert(
                 || {
                     self.quiescence_search(
                         evaluator,
@@ -228,7 +253,7 @@ impl LunaticSearchState {
                     )
                 }, 
                 None
-            )
+            ))
         } else {
             let mut value = -Evaluation::INFINITY;
             let mut best_move = None;
@@ -254,11 +279,12 @@ impl LunaticSearchState {
                         halfmove_clock + 1,
                         options,
                         -beta,
-                        -alpha
-                    );
+                        -alpha,
+                        terminator
+                    )?;
                     game_history.pop();
                     if child_value >= beta {
-                        return T::convert(|| beta, None);
+                        return Ok(T::convert(|| beta, None));
                     }
                 }
             }
@@ -289,8 +315,10 @@ impl LunaticSearchState {
                         halfmove_clock,
                         options,
                         -beta,
-                        -alpha
-                    );
+                        -alpha,
+                        terminator
+                    )?;
+
                     //If it was searched to a reduced depth and it
                     //increased alpha, search again with full depth
                     if reduced_depth < depth && child_value > alpha {
@@ -326,7 +354,7 @@ impl LunaticSearchState {
                     best_move
                 }
             );
-            T::convert(|| value, Some(best_move))
+            Ok(T::convert(|| value, Some(best_move)))
         }
     }
 
