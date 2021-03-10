@@ -43,8 +43,8 @@ fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) ->
     }
 
     //Threefold repetition
-    //Two plies for a move, one extra accounting for the current board
-    if halfmove_clock >= 2 + 1 {
+    //Skip the first move (2 plies) and ensure at least one other move to compare it to (2 plies)
+    if halfmove_clock >= 4 {
         //Any repetition means a loop where the best move involves repeating moves, so
         //the first repetition is immediately a draw. No point playing out three repetitions.
 
@@ -52,8 +52,8 @@ fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) ->
             .iter()
             .rev()
             .take(halfmove_clock as usize)
-            .skip(1) // Skip our board
             .step_by(2) // Every second ply so it's our turn
+            .skip(1) // Skip our board
             .any(|&hash| hash == board.get_hash());
         if threefold {
             return true;
