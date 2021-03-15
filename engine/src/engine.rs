@@ -26,8 +26,8 @@ pub struct LunaticSearchState {
 pub(crate) fn move_resets_fifty_move_rule(mv: ChessMove, board: &Board) -> bool {
     // The only capturing move that doesn't move to the captured piece's square
     // is en passant, which is a pawn move and zeroes anyway
-    board.piece_on(mv.get_source()) == Some(Piece::Pawn) ||
-    board.piece_on(mv.get_dest()).is_some()
+    board.pieces(Piece::Pawn) & BitBoard::from_square(mv.get_source()) |
+    board.combined() & BitBoard::from_square(mv.get_dest()) != EMPTY
 }
 
 ///No captures or promotions
@@ -140,13 +140,13 @@ impl LunaticSearchState {
         terminator: &Arc<AtomicBool>
     ) -> Result<SearchResult, SearchError> {
         let mut nodes = 0;
-        let mut history = game_history.to_vec();
+        let mut game_history = game_history.to_vec();
         //Quiescence search
-        history.reserve(32);
+        game_history.reserve(32);
         let result = self.search_position::<BestMove, E>(
                 evaluator,
                 board,
-                &mut history,
+                &mut game_history.clone(),
                 &mut nodes,
                 depth,
                 0,
@@ -156,8 +156,6 @@ impl LunaticSearchState {
                 Evaluation::INFINITY,
                 terminator
         );
-        //`search_position` may have trashed game_history.
-        history = game_history.to_vec();
         
         match result {
             Ok(Some((mv, value))) => Ok({
@@ -174,16 +172,13 @@ impl LunaticSearchState {
                     };
                     board = board.make_move_new(mv);
                     principal_variation.push(mv);
-                    history.push(board.get_hash());
+                    game_history.push(board.get_hash());
 
-                    next_move = if draw_by_move_rule(&board, &history, halfmove_clock) {
+                    next_move = if draw_by_move_rule(&board, &game_history, halfmove_clock) {
                         None
                     } else {
                         self.transposition_table.get(&board).map(|e| e.best_move)
                     };
-                }
-                for _ in 0..principal_variation.len() {
-                    history.pop();
                 }
                 
                 SearchResult {

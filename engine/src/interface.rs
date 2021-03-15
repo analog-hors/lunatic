@@ -64,16 +64,24 @@ impl LunaticContext {
                 resolver
             }) = thinker_recv.recv() {
                 let search_start_time = Instant::now();
-                let mut game_history = Vec::with_capacity(100);
+                let mut history = Vec::with_capacity(100);
                 let mut board = initial_pos;
-                game_history.push(board.get_hash());
+                history.push(board.get_hash());
                 for mv in moves {
                     if crate::engine::move_resets_fifty_move_rule(mv, &board) {
-                        game_history.clear();
+                        history.clear();
                     }
                     board = board.make_move_new(mv);
-                    game_history.push(board.get_hash());
+                    history.push(board.get_hash());
                 }
+                //Deduplicate to feed into engine
+                let mut game_history = Vec::new();
+                for (i, hash) in history.iter().enumerate() {
+                    if i + 1 == history.len() || !history[i+1..].contains(hash) {
+                        game_history.push(*hash);
+                    }
+                }
+                
                 let halfmove_clock = game_history.len() as u8;
                 
                 let mut search = LunaticSearchState::new(
