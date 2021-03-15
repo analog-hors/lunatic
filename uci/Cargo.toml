@@ -7,7 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chess = "3.1"
+chess = "3"
 lunatic = { path = "../engine" }
 vampirc-uci = { version = "0.11", features = ["chess"] }
-futures = "0.3.8"

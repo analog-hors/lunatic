@@ -6,8 +6,5 @@ members = [
     "lichess"
 ]
 
-[patch.crates-io]
-chess = { git = "https://github.com/jordanbray/chess", rev = "a09032e" }
-
 [profile.release]
 debug = true
