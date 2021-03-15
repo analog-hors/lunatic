@@ -600,6 +600,7 @@ name = "lunatic"
 version = "0.1.0"
 dependencies = [
  "arraydeque",
+ "arrayvec",
  "chess",
  "serde",
 ]

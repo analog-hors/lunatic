@@ -3,7 +3,7 @@ pub use standard::*;
 
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Evaluation(i32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,7 +22,12 @@ impl Display for Evaluation {
 impl Display for EvaluationKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match *self {
-            EvaluationKind::Centipawn(cp) => write!(f, "{}.{}", cp / 100, cp.abs() % 100),
+            EvaluationKind::Centipawn(cp) => {
+                if cp < 0 {
+                    write!(f, "-")?;
+                }
+                write!(f, "{}.{}", cp.abs() / 100, cp.abs() % 100)
+            },
             EvaluationKind::MateIn(m) => write!(f, "M{}", (m + 1) / 2),
             EvaluationKind::MatedIn(m) => write!(f, "-M{}", (m + 1) / 2)
         }
@@ -108,4 +113,5 @@ impl std::ops::Neg for Evaluation {
 
 pub trait Evaluator {
     fn evaluate(&self, board: &chess::Board, ply_index: u8) -> Evaluation;
+    fn piece_value(&self, piece: chess::Piece) -> Evaluation;
 }

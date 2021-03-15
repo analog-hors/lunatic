@@ -288,7 +288,12 @@ impl LunaticSearchState {
                     }
                 }
             }
-            for (i, mv) in SortedMoveGenerator::new(&self.transposition_table, killer_move, *board).enumerate() {
+            for (i, mv) in SortedMoveGenerator::new(
+                &self.transposition_table,
+                evaluator,
+                killer_move, 
+                *board
+            ).enumerate() {
                 let child_board = board.make_move_new(mv);
                 let quiet = move_is_quiet(&board, &child_board);
                 let gives_check = *child_board.checkers() != EMPTY;
@@ -388,7 +393,7 @@ impl LunaticSearchState {
         if alpha < stand_pat {
             alpha = stand_pat;
         }
-        for mv in quiescence_move_generator(&board) {
+        for mv in quiescence_move_generator(evaluator, &board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
                 1

@@ -141,6 +141,17 @@ impl Evaluator for StandardEvaluator {
             BoardStatus::Stalemate => Evaluation::DRAW
         }
     }
+
+    fn piece_value(&self, piece: Piece) -> Evaluation {
+        Evaluation::from_centipawns(match piece {
+            Piece::Pawn => self.pawn,
+            Piece::Knight => self.knight,
+            Piece::Bishop => self.bishop,
+            Piece::Rook => self.rook,
+            Piece::Queen => self.queen,
+            Piece::King => 0
+        })
+    }
 }
 
 impl StandardEvaluator {
