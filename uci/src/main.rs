@@ -10,7 +10,7 @@ use lunatic::engine::SearchOptions;
 struct EngineSearch {
     start: Instant,
     think_time: Duration,
-    search_stream: std::sync::mpsc::Receiver<(SearchResult, Duration)>,
+    search_stream: std::sync::mpsc::Receiver<ContextSearchResult>,
     search_request: SearchRequest
 }
 
@@ -19,17 +19,17 @@ fn send_message(message: UciMessage) {
     std::io::stdout().flush().unwrap();
 }
 
-fn send_info(info: SearchResult, time: Duration) {
+fn send_info(result: ContextSearchResult) {
     send_message(UciMessage::Info(vec![
-        match info.value.kind() {
+        match result.result.value.kind() {
             EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
             EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
             EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
         },
-        UciInfoAttribute::Depth(info.depth as u8),
-        UciInfoAttribute::Nodes(info.nodes as u64),
-        UciInfoAttribute::Pv(info.principal_variation),
-        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(time).unwrap())
+        UciInfoAttribute::Depth(result.result.depth as u8),
+        UciInfoAttribute::Nodes(result.total_nodes_searched as u64),
+        UciInfoAttribute::Pv(result.result.principal_variation),
+        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(result.total_search_duration).unwrap())
     ]));
 }
 
@@ -187,15 +187,15 @@ fn main() {
                 let mv = search.search_request
                     .terminate()
                     .unwrap()
-                    .0
+                    .result
                     .mv;
-                for (info, time) in search.search_stream.try_iter() {
-                    send_info(info, time);
+                for result in search.search_stream.try_iter() {
+                    send_info(result);
                 }
                 send_message(UciMessage::best_move(mv));
             } else {
-                for (info, time) in s.search_stream.try_iter() {
-                    send_info(info, time);
+                for result in s.search_stream.try_iter() {
+                    send_info(result);
                 }
             }
         }

@@ -62,16 +62,16 @@ enum ClientMoveInfo {
     Book(u16)
 }
 
-fn print_info(iter: impl Iterator<Item=(SearchResult, Duration)>) {
-    for (info, time) in iter {
-        let time = time.as_secs_f32();
+fn print_info(iter: impl Iterator<Item=ContextSearchResult>) {
+    for result in iter {
+        let time = result.total_search_duration.as_secs_f32();
         println!("Time: {:.1}", time);
-        println!("Value: {}", info.value);
-        println!("Depth: {}", info.depth);
-        println!("Nodes: {}", info.nodes);
-        println!("NPS: {:.2}k", info.nodes as f32 / 1000.0 / time);
+        println!("Value: {}", result.result.value);
+        println!("Depth: {}", result.result.depth);
+        println!("Nodes: {}", result.total_nodes_searched);
+        println!("NPS: {:.2}k", result.total_nodes_searched as f32 / 1000.0 / time);
         print!("PV:");
-        for mv in info.principal_variation {
+        for mv in result.result.principal_variation {
             print!(" {}", mv);
         }
         println!();
@@ -194,7 +194,7 @@ impl ChessSession {
             let engine_mv = request
                 .terminate()
                 .unwrap()
-                .0
+                .result
                 .mv;
             print_info(info_stream.try_iter());
             mv = Some((engine_mv, ClientMoveInfo::Engine(think_begin.elapsed())));

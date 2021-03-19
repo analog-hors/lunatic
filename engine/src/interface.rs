@@ -10,11 +10,11 @@ use crate::evaluation::*;
 use crate::engine::*;
 pub use crate::engine::SearchResult;
 
-pub struct SearchRequest(Arc<AtomicBool>, Receiver<Option<(SearchResult, Duration)>>);
+pub struct SearchRequest(Arc<AtomicBool>, Receiver<Option<ContextSearchResult>>);
 
 impl SearchRequest {
     ///End the search. The search channel will no longer produce new outputs.
-    pub fn terminate(&mut self) -> Option<(SearchResult, Duration)> {
+    pub fn terminate(&mut self) -> Option<ContextSearchResult> {
         self.0.store(true, Ordering::Release);
         self.1.recv().unwrap()
     }
@@ -33,6 +33,14 @@ impl<E: Default> Default for LunaticContextSettings<E> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ContextSearchResult {
+    pub result: SearchResult,
+    pub search_duration: Duration,
+    pub total_nodes_searched: u32,
+    pub total_search_duration: Duration
+}
+
 struct SearchParams {
     initial_pos: Board,
     moves: Vec<ChessMove>,
@@ -40,8 +48,8 @@ struct SearchParams {
     max_depth: u8,
     options: SearchOptions,
     terminator: Arc<AtomicBool>,
-    resolver: SyncSender<Option<(SearchResult, Duration)>>,
-    info_channel: Sender<(SearchResult, Duration)>
+    resolver: SyncSender<Option<ContextSearchResult>>,
+    info_channel: Sender<ContextSearchResult>
 }
 
 #[derive(Debug)]
@@ -91,9 +99,11 @@ impl LunaticContext {
                 let mut search_result = None;
                 
                 let mut depth = 0;
+                let mut nodes = 0;
                 loop {
                     let mut finished = depth as u8 > max_depth;
                     if !finished {
+                        let iteration_start_time = Instant::now();
                         let search = search.best_move(
                             &settings.evaluator,
                             &board,
@@ -106,7 +116,13 @@ impl LunaticContext {
                         depth += 1;
                         match search {
                             Ok(result) => {
-                                let result = (result, search_start_time.elapsed());
+                                nodes += result.nodes;
+                                let result = ContextSearchResult {
+                                    result,
+                                    search_duration: iteration_start_time.elapsed(),
+                                    total_nodes_searched: nodes,
+                                    total_search_duration: search_start_time.elapsed()
+                                };
                                 let _ = info_channel.send(result.clone());
                                 search_result = Some(result);
                             }
@@ -133,7 +149,7 @@ impl LunaticContext {
         transposition_table_size: usize,
         max_depth: u8,
         options: SearchOptions
-    ) -> (Receiver<(SearchResult, Duration)>, SearchRequest) {
+    ) -> (Receiver<ContextSearchResult>, SearchRequest) {
         let (info_channel, info_channel_recv) = channel();
         let (resolver, result) = sync_channel(0);
         let terminator = Arc::new(AtomicBool::new(false));
