@@ -2,14 +2,18 @@ use std::io::{BufRead, Write};
 use std::time::{Instant, Duration};
 use std::sync::mpsc::{channel, TryRecvError};
 
+use chess::*;
+
 use vampirc_uci::{UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::*;
 use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
 use lunatic::engine::SearchOptions;
+use lunatic::time::{FixedTimeManager, PercentageTimeManager, TimeManager};
 
 struct EngineSearch {
+    time_manager: Box<dyn TimeManager>,
     start: Instant,
-    think_time: Duration,
+    time_left: Duration,
     search_stream: std::sync::mpsc::Receiver<ContextSearchResult>,
     search_request: SearchRequest
 }
@@ -19,7 +23,7 @@ fn send_message(message: UciMessage) {
     std::io::stdout().flush().unwrap();
 }
 
-fn send_info(result: ContextSearchResult) {
+fn send_info(result: &ContextSearchResult) {
     send_message(UciMessage::Info(vec![
         match result.result.value.kind() {
             EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
@@ -28,19 +32,21 @@ fn send_info(result: ContextSearchResult) {
         },
         UciInfoAttribute::Depth(result.result.depth as u8),
         UciInfoAttribute::Nodes(result.total_nodes_searched as u64),
-        UciInfoAttribute::Pv(result.result.principal_variation),
+        UciInfoAttribute::Pv(result.result.principal_variation.clone()),
         UciInfoAttribute::Time(vampirc_uci::Duration::from_std(result.total_search_duration).unwrap())
     ]));
 }
 
 fn main() {
-    let mut position = None;
+    let mut position: Option<(Board, Vec<ChessMove>)> = None;
     let settings = LunaticContextSettings::<StandardEvaluator>::default();
     let engine = LunaticContext::new(settings);
     let mut search = None;
     const MEGABYTE: usize = 1000_000;
     let mut transposition_table_size = 4 * MEGABYTE;
     let mut search_options = SearchOptions::default();
+    let mut percent_time_used_per_move = 0.05f32;
+    let mut minimum_time_used_per_move = Duration::from_secs(0);
 
     let (messages_send, messages) = channel();
     std::thread::spawn(move || {
@@ -86,6 +92,18 @@ fn main() {
                             min: Some(0),
                             max: Some(u8::MAX as i64)
                         }));
+                        send_message(UciMessage::Option(UciOptionConfig::Spin {
+                            name: "Percent of time used per move".to_owned(),
+                            default: Some((percent_time_used_per_move * 100.0) as i64),
+                            min: Some(0),
+                            max: Some(100)
+                        }));
+                        send_message(UciMessage::Option(UciOptionConfig::Spin {
+                            name: "Minimum time used per move (ms)".to_owned(),
+                            default: Some(minimum_time_used_per_move.as_secs() as i64),
+                            min: Some(0),
+                            max: Some(u32::MAX as i64)
+                        }));
                         send_message(UciMessage::UciOk);
                     }
                     UciMessage::Debug(_) => {}
@@ -122,6 +140,21 @@ fn main() {
                                 .parse()
                                 .unwrap();
                         }
+                        "Percent of time used per move" => {
+                            percent_time_used_per_move = value
+                                .unwrap()
+                                .parse::<f32>()
+                                .unwrap()
+                                / 100f32;
+                        }
+                        "Minimum time used per move (ms)" => {
+                            let time = value
+                                .unwrap()
+                                .parse()
+                                .unwrap();
+                            minimum_time_used_per_move =
+                                Duration::from_secs(time);
+                        }
                         _ => {}
                     }
                     UciMessage::UciNewGame => {}
@@ -133,14 +166,37 @@ fn main() {
                         position = Some((board, moves));
                     }
                     UciMessage::Go { time_control, search_control } => {
-                        let mut think_time = Duration::from_secs(5);
+                        let time_manager: Box<dyn TimeManager>;
                         let mut max_depth = 64;
-                        if let Some(time_control) = time_control {
-                            if let UciTimeControl::MoveTime(time) = time_control {
-                                think_time = time.to_std().unwrap();
+                        time_manager = match time_control {
+                            Some(UciTimeControl::MoveTime(time)) => Box::new(
+                                FixedTimeManager::new(time.to_std().unwrap())
+                            ),
+                            Some(UciTimeControl::TimeLeft {
+                                white_time,
+                                black_time,
+                                ..
+                            }) => {
+                                let time_left = match position
+                                    .as_ref()
+                                    .unwrap()
+                                    .0
+                                    .side_to_move() {
+                                    Color::White => white_time,
+                                    Color::Black => black_time
+                                }.unwrap().to_std().unwrap();
+                                Box::new(PercentageTimeManager::new(
+                                    time_left, 
+                                    percent_time_used_per_move,
+                                    minimum_time_used_per_move
+                                ))
                             }
-                            //TODO implement the rest
-                        }
+                            Some(UciTimeControl::Ponder) => todo!(),
+                            None | Some(UciTimeControl::Infinite) => Box::new(
+                                FixedTimeManager::new(Duration::from_secs(5))
+                            )
+                        };
+                        
                         if let Some(search_control) = search_control {
                             if let Some(depth) = search_control.depth {
                                 max_depth = depth;
@@ -158,8 +214,9 @@ fn main() {
                             );
 
                         search = Some(EngineSearch {
+                            time_manager,
                             start: Instant::now(),
-                            think_time,
+                            time_left: Duration::from_secs(u64::MAX),
                             search_stream: info_channel,
                             search_request
                         });
@@ -179,7 +236,7 @@ fn main() {
         }
         
         if let Some(s) = &mut search {
-            if s.start.elapsed() > s.think_time {
+            if s.start.elapsed() > s.time_left {
                 end_search = true;
             }
             if end_search {
@@ -190,12 +247,13 @@ fn main() {
                     .result
                     .mv;
                 for result in search.search_stream.try_iter() {
-                    send_info(result);
+                    send_info(&result);
                 }
                 send_message(UciMessage::best_move(mv));
             } else {
                 for result in s.search_stream.try_iter() {
-                    send_info(result);
+                    send_info(&result);
+                    s.time_left = s.time_manager.update(result.result, result.search_duration);
                 }
             }
         }
