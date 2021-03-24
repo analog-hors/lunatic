@@ -10,3 +10,4 @@ edition = "2018"
 chess = "3"
 lunatic = { path = "../engine" }
 vampirc-uci = { version = "0.11", features = ["chess"] }
+indexmap = "1"

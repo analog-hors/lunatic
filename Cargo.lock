@@ -590,6 +590,7 @@ name = "lunatic-uci"
 version = "0.1.0"
 dependencies = [
  "chess",
+ "indexmap",
  "lunatic",
  "vampirc-uci",
 ]

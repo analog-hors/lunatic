@@ -9,6 +9,7 @@ use lunatic::*;
 use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
 use lunatic::engine::SearchOptions;
 use lunatic::time::{FixedTimeManager, PercentageTimeManager, TimeManager};
+use indexmap::IndexMap;
 
 struct EngineSearch {
     time_manager: Box<dyn TimeManager>,
@@ -37,16 +38,117 @@ fn send_info(result: &ContextSearchResult) {
     ]));
 }
 
+struct UciOptions {
+    transposition_table_size: usize,
+    search_options: SearchOptions,
+    percent_time_used_per_move: f32,
+    minimum_time_used_per_move: Duration
+}
+
 fn main() {
     let mut position: Option<(Board, Vec<ChessMove>)> = None;
     let settings = LunaticContextSettings::<StandardEvaluator>::default();
     let engine = LunaticContext::new(settings);
     let mut search = None;
+
     const MEGABYTE: usize = 1000_000;
-    let mut transposition_table_size = 4 * MEGABYTE;
-    let mut search_options = SearchOptions::default();
-    let mut percent_time_used_per_move = 0.05f32;
-    let mut minimum_time_used_per_move = Duration::from_secs(0);
+    //Use IndexMap to preserve options order
+    let mut options_handlers: IndexMap<String, (UciOptionConfig, Box<dyn Fn(&mut UciOptions, String)>)>
+        = IndexMap::new();
+    let mut options = UciOptions {
+        transposition_table_size: 4 * MEGABYTE,
+        search_options: SearchOptions::default(),
+        percent_time_used_per_move: 0.05f32,
+        minimum_time_used_per_move: Duration::from_secs(0)
+    };
+    macro_rules! add_handlers {
+        ($($option:expr => $handler:expr)*) => {
+            $({
+                let option = $option;
+                options_handlers.insert(match &option {
+                    UciOptionConfig::Check { name, .. } => name,
+                    UciOptionConfig::Spin { name, .. } => name,
+                    UciOptionConfig::Combo { name, .. } => name,
+                    UciOptionConfig::Button { name } => name,
+                    UciOptionConfig::String { name, .. } => name
+                }.to_owned(), (option, Box::new($handler)));
+            })*
+        }
+    }
+    add_handlers! {
+        UciOptionConfig::Spin {
+            name: "Hash".to_owned(),
+            default: Some((options.transposition_table_size / MEGABYTE) as i64),
+            min: Some(0),
+            max: Some(64 * 1000) //64 Gigabytes
+        } => |options, value| {
+            options.transposition_table_size = value
+                .parse::<usize>()
+                .unwrap()
+                * MEGABYTE
+        }
+        UciOptionConfig::Spin {
+            name: "Late Move Reduction".to_owned(),
+            default: Some(options.search_options.late_move_reduction as i64),
+            min: Some(0),
+            max: Some(u8::MAX as i64)
+        } => |options, value| {
+            options.search_options.late_move_reduction = value
+                .parse()
+                .unwrap();
+        }
+        UciOptionConfig::Spin {
+            name: "Late Move Leeway".to_owned(),
+            default: Some(options.search_options.late_move_leeway as i64),
+            min: Some(0),
+            max: Some(u8::MAX as i64)
+        } => |options, value| {
+            options.search_options.late_move_leeway = value
+                .parse()
+                .unwrap();
+        }
+        UciOptionConfig::Check {
+            name: "Null Move Pruning".to_owned(),
+            default: Some(options.search_options.null_move_pruning)
+        } => |options, value| {
+            options.search_options.null_move_pruning = value
+                .parse()
+                .unwrap();
+        }
+        UciOptionConfig::Spin {
+            name: "Null Move Reduction".to_owned(),
+            default: Some(options.search_options.null_move_reduction as i64),
+            min: Some(0),
+            max: Some(u8::MAX as i64)
+        } => |options, value| {
+            options.search_options.null_move_reduction = value
+                .parse()
+                .unwrap();
+        }
+        UciOptionConfig::Spin {
+            name: "Percent of time used per move".to_owned(),
+            default: Some((options.percent_time_used_per_move * 100.0) as i64),
+            min: Some(0),
+            max: Some(100)
+        } => |options, value| {
+            options.percent_time_used_per_move = value
+                .parse::<f32>()
+                .unwrap()
+                / 100f32;
+        }
+        UciOptionConfig::Spin {
+            name: "Minimum time used per move (ms)".to_owned(),
+            default: Some(options.minimum_time_used_per_move.as_secs() as i64),
+            min: Some(0),
+            max: Some(u32::MAX as i64)
+        } => |options, value| {
+            let time = value
+                .parse()
+                .unwrap();
+            options.minimum_time_used_per_move =
+                Duration::from_secs(time);
+        }
+    }
 
     let (messages_send, messages) = channel();
     std::thread::spawn(move || {
@@ -64,98 +166,17 @@ fn main() {
                     UciMessage::Uci => {
                         send_message(UciMessage::id_name("Lunatic"));
                         send_message(UciMessage::id_author("Analog Hors"));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Hash".to_owned(),
-                            default: Some((transposition_table_size / MEGABYTE) as i64),
-                            min: Some(0),
-                            max: Some(64 * 1000) //64 Gigabytes
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Late Move Reduction".to_owned(),
-                            default: Some(search_options.late_move_reduction as i64),
-                            min: Some(0),
-                            max: Some(u8::MAX as i64)
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Late Move Leeway".to_owned(),
-                            default: Some(search_options.late_move_leeway as i64),
-                            min: Some(0),
-                            max: Some(u8::MAX as i64)
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Check {
-                            name: "Null Move Pruning".to_owned(),
-                            default: Some(search_options.null_move_pruning)
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Null Move Reduction".to_owned(),
-                            default: Some(search_options.null_move_reduction as i64),
-                            min: Some(0),
-                            max: Some(u8::MAX as i64)
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Percent of time used per move".to_owned(),
-                            default: Some((percent_time_used_per_move * 100.0) as i64),
-                            min: Some(0),
-                            max: Some(100)
-                        }));
-                        send_message(UciMessage::Option(UciOptionConfig::Spin {
-                            name: "Minimum time used per move (ms)".to_owned(),
-                            default: Some(minimum_time_used_per_move.as_secs() as i64),
-                            min: Some(0),
-                            max: Some(u32::MAX as i64)
-                        }));
+                        for (option, _) in options_handlers.values() {
+                            send_message(UciMessage::Option(option.clone()));
+                        }
                         send_message(UciMessage::UciOk);
                     }
                     UciMessage::Debug(_) => {}
                     UciMessage::IsReady => send_message(UciMessage::ReadyOk),
-                    UciMessage::SetOption { name, value } => match &name[..] {
-                        "Hash" => {
-                            transposition_table_size = value
-                                .unwrap()
-                                .parse::<usize>()
-                                .unwrap()
-                                * MEGABYTE
+                    UciMessage::SetOption { name, value } => {
+                        if let Some((_, handler)) = options_handlers.get(&name) {
+                            handler(&mut options, value.unwrap())
                         }
-                        "Late Move Reduction" => {
-                            search_options.late_move_reduction = value
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                        }
-                        "Late Move Leeway" => {
-                            search_options.late_move_leeway = value
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                        }
-                        "Null Move Pruning" => {
-                            search_options.null_move_pruning = value
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                        }
-                        "Null Move Reduction" => {
-                            search_options.null_move_reduction = value
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                        }
-                        "Percent of time used per move" => {
-                            percent_time_used_per_move = value
-                                .unwrap()
-                                .parse::<f32>()
-                                .unwrap()
-                                / 100f32;
-                        }
-                        "Minimum time used per move (ms)" => {
-                            let time = value
-                                .unwrap()
-                                .parse()
-                                .unwrap();
-                            minimum_time_used_per_move =
-                                Duration::from_secs(time);
-                        }
-                        _ => {}
                     }
                     UciMessage::UciNewGame => {}
         
@@ -187,8 +208,8 @@ fn main() {
                                 }.unwrap().to_std().unwrap();
                                 Box::new(PercentageTimeManager::new(
                                     time_left, 
-                                    percent_time_used_per_move,
-                                    minimum_time_used_per_move
+                                    options.percent_time_used_per_move,
+                                    options.minimum_time_used_per_move
                                 ))
                             }
                             Some(UciTimeControl::Ponder) => todo!(),
@@ -208,9 +229,9 @@ fn main() {
                             engine.begin_think(
                                 initial_pos, 
                                 moves,
-                                transposition_table_size,
+                                options.transposition_table_size,
                                 max_depth,
-                                search_options.clone()
+                                options.search_options.clone()
                             );
 
                         search = Some(EngineSearch {
