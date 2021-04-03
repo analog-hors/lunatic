@@ -252,7 +252,7 @@ impl LunaticSearchState {
         } else {
             let mut value = -Evaluation::INFINITY;
             let mut best_move = None;
-            let killer_move = self.killer_table[ply_index as usize].clone();
+            let killers = self.killer_table[ply_index as usize].clone();
             let in_check = *board.checkers() != EMPTY;
             let ally_pieces = *board.color_combined(board.side_to_move());
             let sliding_pieces = 
@@ -286,7 +286,7 @@ impl LunaticSearchState {
             for (i, mv) in SortedMoveGenerator::new(
                 &self.transposition_table,
                 evaluator,
-                killer_move, 
+                killers, 
                 *board
             ).enumerate() {
                 let child_board = board.make_move_new(mv);

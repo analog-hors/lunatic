@@ -139,7 +139,7 @@ pub struct SortedMoveGenerator<'s, E> {
     board: Board,
     pv_move: Option<ChessMove>,
     captures: Option<Peekable<MaxSelectionSorter<SeeMove>>>,
-    killer_move: KillerTableEntry,
+    killers: KillerTableEntry,
     moves: MoveGen
 }
 
@@ -149,6 +149,7 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(mv) = self.pv_move.take() {
             self.moves.remove_move(mv);
+            self.killers.retain(|&m| m != mv);
             return Some(mv);
         }
 
@@ -156,7 +157,8 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
             let mut see_moves = Vec::with_capacity(40);
             self.moves.set_iterator_mask(*self.board.combined());
             for mv in &mut self.moves {
-                self.killer_move.retain(|&m| m == mv);
+                //Don't worry about removing duplicates from killers here:
+                //They are by definition quiet moves
                 let value = static_exchange_evaluation(
                     self.evaluator,
                     &self.board,
@@ -181,11 +183,12 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
             }
         }
 
-        if let Some(mv) = self.killer_move.pop_front() {
+        if let Some(mv) = self.killers.pop_front() {
             let mut moves = MoveGen::new_legal(&self.board);
             moves.set_iterator_mask(BitBoard::from_square(mv.get_dest()));
             for mv in moves {
                 if mv.get_source() == mv.get_source() {
+                    self.moves.remove_move(mv);
                     return Some(mv);
                 }
             }
@@ -205,7 +208,7 @@ impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
     pub fn new(
         table: &TranspositionTable,
         evaluator: &'s E,
-        killer_move: KillerTableEntry,
+        killers: KillerTableEntry,
         board: Board
     ) -> Self {
         let pv_move = table.get(&board).map(|entry| entry.best_move);
@@ -214,7 +217,7 @@ impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
             board,
             pv_move,
             captures: None,
-            killer_move,
+            killers,
             moves: MoveGen::new_legal(&board)
         }
     }
