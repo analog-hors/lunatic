@@ -367,12 +367,24 @@ impl LunaticSearchState {
         ply_index: u8,
         halfmove_clock: u8,
         mut alpha: Evaluation,
-        beta: Evaluation
+        mut beta: Evaluation
     ) -> Evaluation {
         *node_count += 1;
 
         if draw_by_move_rule(board, game_history, halfmove_clock) {
             return Evaluation::DRAW;
+        }
+
+        if let Some(entry) = self.transposition_table.get(&board) {
+            //Literally any hit is better than quiescence search
+            match entry.kind {
+                TableEntryKind::Exact => return entry.value,
+                TableEntryKind::LowerBound => alpha = alpha.max(entry.value),
+                TableEntryKind::UpperBound => beta = beta.min(entry.value),
+            }
+            if alpha >= beta {
+                return entry.value;
+            }
         }
 
         //The reason we are allowed to safely return the alpha score
