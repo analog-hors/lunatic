@@ -18,9 +18,16 @@ pub struct SearchResult {
 }
 
 pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
-pub struct LunaticSearchState {
+pub struct LunaticSearchState<'s, E> {
+    board: Board,
+    evaluator: &'s E,
+    history: Vec<u64>,
+    halfmove_clock: u8,
+    options: &'s SearchOptions,
     transposition_table: TranspositionTable,
     killer_table: Vec<KillerTableEntry>,
+    current_depth: u8,
+    max_depth: u8
 }
 
 pub(crate) fn move_resets_fifty_move_rule(mv: ChessMove, board: &Board) -> bool {
@@ -116,52 +123,66 @@ impl Default for SearchOptions {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum SearchError {
+    MaxDepth,
     NoMoves,
     Terminated
 }
 
-impl LunaticSearchState {
-    pub fn new(transposition_table_size: usize, killer_table_size: usize) -> Self {
+impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
+    pub fn new(
+        board: &Board,
+        evaluator: &'s E,
+        history: &[u64],
+        halfmove_clock: u8,
+        options: &'s SearchOptions,
+        transposition_table_size: usize,
+        max_depth: u8
+    ) -> Self {
+        let mut history = history.to_vec();
+        //+ 32 for quiescence search
+        history.reserve_exact(max_depth as usize + 32);
         Self {
+            board: *board,
+            evaluator,
+            history,
+            halfmove_clock,
+            options,
             transposition_table: TranspositionTable::with_rounded_size(transposition_table_size),
-            killer_table: vec![KillerTableEntry::new(); killer_table_size]
+            killer_table: vec![KillerTableEntry::new(); max_depth as usize],
+            current_depth: 0,
+            max_depth
         }
     }
 
-    pub fn best_move<E: Evaluator>(
-        &mut self,
-        evaluator: &E,
-        board: &Board,
-        game_history: &[u64],
-        halfmove_clock: u8,
-        depth: u8,
-        options: &SearchOptions,
-        terminator: &Arc<AtomicBool>
-    ) -> Result<SearchResult, SearchError> {
+    pub fn deepen(&mut self, terminator: &Arc<AtomicBool>) -> Result<SearchResult, SearchError> {
+        if self.current_depth >= self.max_depth {
+            return Err(SearchError::MaxDepth);
+        }
+
+        let history_len = self.history.len();
+
         let mut nodes = 0;
-        let mut game_history = game_history.to_vec();
-        //Quiescence search
-        game_history.reserve(32);
-        let result = self.search_position::<BestMove, E>(
-                evaluator,
-                board,
-                &mut game_history.clone(),
-                &mut nodes,
-                depth,
-                0,
-                halfmove_clock,
-                options,
-                -Evaluation::INFINITY,
-                Evaluation::INFINITY,
-                terminator
+        self.current_depth += 1;
+        let result = self.search_position::<BestMove>(
+            &self.board.clone(),
+            &mut nodes,
+            self.current_depth,
+            0,
+            self.halfmove_clock,
+            -Evaluation::INFINITY,
+            Evaluation::INFINITY,
+            terminator
         );
+        //Early termination may trash history, so restore the state.
+        self.history.truncate(history_len);
         
         match result {
             Ok(Some((mv, value))) => Ok({
                 let mut principal_variation = Vec::new();
-                let mut board = *board;
-                let mut halfmove_clock = halfmove_clock;
+                let mut board = self.board;
+                let mut halfmove_clock = self.halfmove_clock;
 
                 let mut next_move = Some(mv);
                 while let Some(mv) = next_move.take() {
@@ -172,20 +193,21 @@ impl LunaticSearchState {
                     };
                     board = board.make_move_new(mv);
                     principal_variation.push(mv);
-                    game_history.push(board.get_hash());
+                    self.history.push(board.get_hash());
 
-                    next_move = if draw_by_move_rule(&board, &game_history, halfmove_clock) {
+                    next_move = if draw_by_move_rule(&board, &self.history, halfmove_clock) {
                         None
                     } else {
                         self.transposition_table.get(&board).map(|e| e.best_move)
                     };
                 }
+                self.history.truncate(history_len);
                 
                 SearchResult {
                     mv,
                     value,
                     nodes,
-                    depth,
+                    depth: self.current_depth,
                     principal_variation
                 }
             }),
@@ -194,16 +216,13 @@ impl LunaticSearchState {
         }
     }
     
-    fn search_position<T: SearchReturnType, E: Evaluator>(
+    fn search_position<T: SearchReturnType>(
         &mut self,
-        evaluator: &E,
         board: &Board,
-        game_history: &mut Vec<u64>,
         node_count: &mut u32,
         depth: u8,
         ply_index: u8,
         halfmove_clock: u8,
-        options: &SearchOptions,
         mut alpha: Evaluation,
         mut beta: Evaluation,
         terminator: &Arc<AtomicBool>
@@ -214,7 +233,7 @@ impl LunaticSearchState {
 
         *node_count += 1;
 
-        if draw_by_move_rule(board, game_history, halfmove_clock) {
+        if draw_by_move_rule(board, &self.history, halfmove_clock) {
             return Ok(T::convert(|| Evaluation::DRAW, None));
         }
 
@@ -237,9 +256,8 @@ impl LunaticSearchState {
             Ok(T::convert(
                 || {
                     self.quiescence_search(
-                        evaluator,
+                        self.evaluator,
                         board,
-                        game_history,
                         node_count,
                         ply_index,
                         halfmove_clock,
@@ -261,23 +279,20 @@ impl LunaticSearchState {
                 *board.pieces(Piece::Queen);
 
             //If I have at least one sliding piece...
-            if options.null_move_pruning && ally_pieces & sliding_pieces != EMPTY {
+            if self.options.null_move_pruning && ally_pieces & sliding_pieces != EMPTY {
                 if let Some(child_board) = board.null_move() {
-                    game_history.push(child_board.get_hash());
-                    let child_value = -self.search_position::<PositionEvaluation, E>(
-                        evaluator,
+                    self.history.push(child_board.get_hash());
+                    let child_value = -self.search_position::<PositionEvaluation>(
                         &child_board,
-                        game_history,
                         node_count,
-                        depth.saturating_sub(options.null_move_reduction),
+                        depth.saturating_sub(self.options.null_move_reduction),
                         ply_index + 1,
                         halfmove_clock + 1,
-                        options,
                         -beta,
                         -alpha,
                         terminator
                     )?;
-                    game_history.pop();
+                    self.history.pop();
                     if child_value >= beta {
                         return Ok(T::convert(|| beta, None));
                     }
@@ -285,7 +300,7 @@ impl LunaticSearchState {
             }
             for (i, mv) in SortedMoveGenerator::new(
                 &self.transposition_table,
-                evaluator,
+                self.evaluator,
                 killers, 
                 *board
             ).enumerate() {
@@ -298,23 +313,26 @@ impl LunaticSearchState {
                     halfmove_clock + 1
                 };
                 let mut reduced_depth = depth;
-                if i as u8 > options.late_move_leeway && depth > 3 &&
+                let mut narrowed_beta = beta;
+                if i as u8 > self.options.late_move_leeway && depth > 3 &&
                    quiet && !in_check && !gives_check {
-                    reduced_depth = depth.saturating_sub(options.late_move_reduction);
+                    reduced_depth = if self.options.late_move_reduction < depth {
+                        depth - self.options.late_move_reduction
+                    } else {
+                        1
+                    };
+                    narrowed_beta = alpha + Evaluation::from_centipawns(1);
                 }
-                game_history.push(child_board.get_hash());
+                self.history.push(child_board.get_hash());
                 let mut child_value;
                 loop {
-                    child_value = -self.search_position::<PositionEvaluation, E>(
-                        evaluator,
+                    child_value = -self.search_position::<PositionEvaluation>(
                         &child_board,
-                        game_history,
                         node_count,
-                        depth - 1,
+                        reduced_depth - 1,
                         ply_index + 1,
                         halfmove_clock,
-                        options,
-                        -beta,
+                        -narrowed_beta,
                         -alpha,
                         terminator
                     )?;
@@ -323,11 +341,12 @@ impl LunaticSearchState {
                     //increased alpha, search again with full depth
                     if reduced_depth < depth && child_value > alpha {
                         reduced_depth = depth;
+                        narrowed_beta = beta;
                         continue;
                     }
                     break;
                 }
-                game_history.pop();
+                self.history.pop();
                 if child_value > value || best_move.is_none() {
                     value = child_value;
                     best_move = Some(mv);
@@ -362,7 +381,6 @@ impl LunaticSearchState {
         &mut self,
         evaluator: &impl Evaluator,
         board: &Board,
-        game_history: &mut Vec<u64>,
         node_count: &mut u32,
         ply_index: u8,
         halfmove_clock: u8,
@@ -371,7 +389,7 @@ impl LunaticSearchState {
     ) -> Evaluation {
         *node_count += 1;
 
-        if draw_by_move_rule(board, game_history, halfmove_clock) {
+        if draw_by_move_rule(board, &self.history, halfmove_clock) {
             return Evaluation::DRAW;
         }
 
@@ -407,18 +425,17 @@ impl LunaticSearchState {
             } else {
                 halfmove_clock + 1
             };
-            game_history.push(child_board.get_hash());
+            self.history.push(child_board.get_hash());
             let child_value = -self.quiescence_search(
                 evaluator,
                 &child_board,
-                game_history,
                 node_count,
                 ply_index + 1,
                 depth_since_zeroing,
                 -beta,
                 -alpha
             );
-            game_history.pop();
+            self.history.pop();
             if child_value >= beta {
                 return beta;
             }

@@ -93,48 +93,37 @@ impl LunaticContext {
                 let halfmove_clock = game_history.len() as u8;
                 
                 let mut search = LunaticSearchState::new(
+                    &board,
+                    &settings.evaluator,
+                    &history,
+                    halfmove_clock,
+                    &options,
                     transposition_table_size,
-                    max_depth as usize
+                    max_depth
                 );
                 let mut search_result = None;
                 
-                let mut depth = 0;
                 let mut nodes = 0;
                 loop {
-                    let mut finished = depth as u8 > max_depth;
-                    if !finished {
-                        let iteration_start_time = Instant::now();
-                        let search = search.best_move(
-                            &settings.evaluator,
-                            &board,
-                            &mut game_history,
-                            halfmove_clock,
-                            depth as u8,
-                            &options,
-                            &terminator
-                        );
-                        depth += 1;
-                        match search {
-                            Ok(result) => {
-                                nodes += result.nodes;
-                                let result = ContextSearchResult {
-                                    result,
-                                    search_duration: iteration_start_time.elapsed(),
-                                    total_nodes_searched: nodes,
-                                    total_search_duration: search_start_time.elapsed()
-                                };
-                                let _ = info_channel.send(result.clone());
-                                search_result = Some(result);
-                            }
-                            Err(SearchError::Terminated) => finished = true,
-                            Err(SearchError::NoMoves) => {}
+                    let iteration_start_time = Instant::now();
+                    let search = search.deepen(&terminator);
+                    match search {
+                        Ok(result) => {
+                            nodes += result.nodes;
+                            let result = ContextSearchResult {
+                                result,
+                                search_duration: iteration_start_time.elapsed(),
+                                total_nodes_searched: nodes,
+                                total_search_duration: search_start_time.elapsed()
+                            };
+                            let _ = info_channel.send(result.clone());
+                            search_result = Some(result);
                         }
-                    }
-                    if finished {
-                        resolver.send(search_result).unwrap();
-                        break;
+                        Err(SearchError::Terminated) | Err(SearchError::MaxDepth) => break,
+                        Err(SearchError::NoMoves) => {}
                     }
                 }
+                resolver.send(search_result).unwrap();
             }
         });
         LunaticContext {
