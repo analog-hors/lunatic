@@ -256,7 +256,6 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             Ok(T::convert(
                 || {
                     self.quiescence_search(
-                        self.evaluator,
                         board,
                         node_count,
                         ply_index,
@@ -379,7 +378,6 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
 
     fn quiescence_search(
         &mut self,
-        evaluator: &impl Evaluator,
         board: &Board,
         node_count: &mut u32,
         ply_index: u8,
@@ -411,14 +409,14 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         //move that matches or is better than the value, so we didn't
         //*necessarily* have to play this line and it's *probably* at
         //least that value.
-        let stand_pat = evaluator.evaluate(board, ply_index);
+        let stand_pat = self.evaluator.evaluate(board, ply_index);
         if stand_pat > beta {
             return beta;
         }
         if alpha < stand_pat {
             alpha = stand_pat;
         }
-        for mv in quiescence_move_generator(evaluator, &board) {
+        for mv in quiescence_move_generator(self.evaluator, &board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
                 1
@@ -427,7 +425,6 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             };
             self.history.push(child_board.get_hash());
             let child_value = -self.quiescence_search(
-                evaluator,
                 &child_board,
                 node_count,
                 ply_index + 1,
