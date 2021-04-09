@@ -157,8 +157,9 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
             let mut see_moves = Vec::with_capacity(40);
             self.moves.set_iterator_mask(*self.board.combined());
             for mv in &mut self.moves {
-                //Don't worry about removing duplicates from killers here:
-                //They are by definition quiet moves
+                //Even though killers are quiet, it's possible the
+                //same move is not quiet as it is a different position
+                self.killers.retain(|&m| m != mv);
                 let value = static_exchange_evaluation(
                     self.evaluator,
                     &self.board,
@@ -183,11 +184,11 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
             }
         }
 
-        if let Some(mv) = self.killers.pop_front() {
+        while let Some(mv) = self.killers.pop_front() {
             let mut moves = MoveGen::new_legal(&self.board);
             moves.set_iterator_mask(BitBoard::from_square(mv.get_dest()));
-            for mv in moves {
-                if mv.get_source() == mv.get_source() {
+            for m in moves {
+                if m.get_source() == mv.get_source() {
                     self.moves.remove_move(mv);
                     return Some(mv);
                 }

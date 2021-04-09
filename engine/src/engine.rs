@@ -353,7 +353,9 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 alpha = alpha.max(value);
                 if alpha >= beta {
                     if quiet {
-                        self.killer_table[ply_index as usize].push_back(mv);
+                        let entry = &mut self.killer_table[ply_index as usize];
+                        entry.retain(|&m| m != mv);
+                        entry.push_back(mv);
                     }
                     break;
                 }
