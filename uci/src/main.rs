@@ -1,6 +1,7 @@
 use std::io::{BufRead, Write};
 use std::time::{Instant, Duration};
 use std::sync::mpsc::{channel, TryRecvError};
+use std::sync::Arc;
 
 use chess::*;
 
@@ -8,6 +9,7 @@ use vampirc_uci::{UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl}
 use lunatic::*;
 use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
 use lunatic::engine::SearchOptions;
+use lunatic::oracle::Oracle;
 use lunatic::time::{FixedTimeManager, PercentageTimeManager, TimeManager};
 use indexmap::IndexMap;
 
@@ -236,7 +238,8 @@ fn main() {
                                 moves,
                                 options.transposition_table_size,
                                 max_depth,
-                                options.search_options.clone()
+                                options.search_options.clone(),
+                                Arc::new(Oracle)
                             );
 
                         search = Some(EngineSearch {

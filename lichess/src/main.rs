@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::time::{Instant, Duration};
+use std::sync::Arc;
 
 use rand::prelude::*;
 use rand::distributions::WeightedIndex;
@@ -13,6 +14,7 @@ use chess_polyglot_reader::{PolyglotReader, PolyglotKey};
 use lunatic::evaluation::StandardEvaluator;
 use lunatic::engine::SearchOptions;
 use lunatic::*;
+use lunatic::oracle::Oracle;
 
 mod api;
 use api::*;
@@ -184,7 +186,8 @@ impl ChessSession {
                     moves,
                     self.settings.transposition_table_size,
                     self.settings.max_depth,
-                    self.settings.search_options.clone()
+                    self.settings.search_options.clone(),
+                    Arc::new(Oracle)
                 );
             let now = Instant::now();
             while now.elapsed().as_secs() < self.settings.think_time {

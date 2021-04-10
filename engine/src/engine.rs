@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::evaluation::{Evaluation, Evaluator};
+use crate::oracle::Oracle;
 use crate::table::*;
 use crate::moves::*;
 
@@ -26,6 +27,7 @@ pub struct LunaticSearchState<'s, E> {
     history: Vec<u64>,
     halfmove_clock: u8,
     options: &'s SearchOptions,
+    oracle: &'s Oracle,
     transposition_table: TranspositionTable,
     killer_table: Vec<KillerTableEntry>,
     current_depth: u8,
@@ -74,6 +76,7 @@ fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) ->
 
 trait SearchReturnType {
     type Output;
+    const REQUIRES_MOVE: bool;
 
     fn convert(
         get_value: impl FnOnce() -> Evaluation,
@@ -85,6 +88,7 @@ struct BestMove;
 
 impl SearchReturnType for BestMove {
     type Output = Option<(ChessMove, Evaluation)>;
+    const REQUIRES_MOVE: bool = true;
 
     fn convert(get_value: impl FnOnce() -> Evaluation, mv: Option<ChessMove>) -> Self::Output {
         mv.map(|mv| (mv, get_value()))
@@ -95,6 +99,7 @@ struct PositionEvaluation;
 
 impl SearchReturnType for PositionEvaluation {
     type Output = Evaluation;
+    const REQUIRES_MOVE: bool = false;
 
     fn convert(get_value: impl FnOnce() -> Evaluation, _: Option<ChessMove>) -> Self::Output {
         get_value()
@@ -139,6 +144,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         history: &[u64],
         halfmove_clock: u8,
         options: &'s SearchOptions,
+        oracle: &'s Oracle,
         transposition_table_size: usize,
         max_depth: u8
     ) -> Self {
@@ -151,6 +157,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             history,
             halfmove_clock,
             options,
+            oracle,
             transposition_table: TranspositionTable::with_rounded_size(transposition_table_size),
             killer_table: vec![KillerTableEntry::new(); max_depth as usize],
             current_depth: 0,
@@ -242,7 +249,13 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         }
 
         let original_alpha = alpha;
-        
+        let terminal_node = board.status() != BoardStatus::Ongoing;
+        if !terminal_node && !T::REQUIRES_MOVE {
+            if let Some(eval) = self.oracle.eval(board) {
+                return Ok(T::convert(|| eval, None));
+            }
+        }
+
         if let Some(entry) = self.transposition_table.get(&board) {
             //Larger subtree means deeper search
             if entry.depth >= depth {
@@ -256,7 +269,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 }
             }
         }
-        if depth == 0 || board.status() != BoardStatus::Ongoing {
+        if depth == 0 || terminal_node {
             Ok(T::convert(
                 || {
                     self.quiescence_search(

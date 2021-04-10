@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use crate::evaluation::*;
 use crate::engine::*;
 pub use crate::engine::SearchResult;
+use crate::oracle::Oracle;
 
 pub struct SearchRequest(Arc<AtomicBool>, Receiver<Option<ContextSearchResult>>);
 
@@ -47,6 +48,7 @@ struct SearchParams {
     transposition_table_size: usize,
     max_depth: u8,
     options: SearchOptions,
+    oracle: Arc<Oracle>,
     terminator: Arc<AtomicBool>,
     resolver: SyncSender<Option<ContextSearchResult>>,
     info_channel: Sender<ContextSearchResult>
@@ -67,6 +69,7 @@ impl LunaticContext {
                 transposition_table_size,
                 max_depth,
                 options,
+                oracle,
                 terminator,
                 info_channel,
                 resolver
@@ -98,6 +101,7 @@ impl LunaticContext {
                     &history,
                     halfmove_clock,
                     &options,
+                    &*oracle,
                     transposition_table_size,
                     max_depth
                 );
@@ -137,7 +141,8 @@ impl LunaticContext {
         moves: Vec<ChessMove>,
         transposition_table_size: usize,
         max_depth: u8,
-        options: SearchOptions
+        options: SearchOptions,
+        oracle: Arc<Oracle>
     ) -> (Receiver<ContextSearchResult>, SearchRequest) {
         let (info_channel, info_channel_recv) = channel();
         let (resolver, result) = sync_channel(0);
@@ -148,6 +153,7 @@ impl LunaticContext {
             transposition_table_size,
             max_depth,
             options,
+            oracle,
             terminator: Arc::clone(&terminator),
             resolver,
             info_channel
