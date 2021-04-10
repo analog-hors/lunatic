@@ -14,7 +14,9 @@ pub struct SearchResult {
     pub value: Evaluation,
     pub nodes: u32,
     pub depth: u8,
-    pub principal_variation: Vec<ChessMove>
+    pub principal_variation: Vec<ChessMove>,
+    pub transposition_table_size: usize,
+    pub transposition_table_entries: usize
 }
 
 pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
@@ -208,7 +210,9 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                     value,
                     nodes,
                     depth: self.current_depth,
-                    principal_variation
+                    principal_variation,
+                    transposition_table_size: self.transposition_table.capacity(),
+                    transposition_table_entries: self.transposition_table.len(),
                 }
             }),
             Ok(None) => Err(SearchError::NoMoves),

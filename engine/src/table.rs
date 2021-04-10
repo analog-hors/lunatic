@@ -19,14 +19,14 @@ pub struct TableEntry {
 }
 
 #[derive(Debug)]
-pub struct TranspositionTable(Vec<Option<(u64, TableEntry)>>);
+pub struct TranspositionTable(Vec<Option<(u64, TableEntry)>>, usize);
 
 //TODO consider using `unsafe` to speed up transposition table access by removing bounds checking?
 impl TranspositionTable {
     ///Rounds up the number of entries to a power of two.
     ///`panic` on overflow.
     pub fn with_rounded_entries(entries: usize) -> Self {
-        Self(vec![None; entries.checked_next_power_of_two().unwrap()])
+        Self(vec![None; entries.checked_next_power_of_two().unwrap()], 0)
     }
 
     ///Converts the size in bytes to an amount of entries
@@ -60,7 +60,16 @@ impl TranspositionTable {
                 *old = (hash, entry);
             }
         } else {
+            self.1 += 1;
             *old = Some((hash, entry));
         }
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn len(&self) -> usize {
+        self.1
     }
 }

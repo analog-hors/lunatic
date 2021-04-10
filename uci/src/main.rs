@@ -25,6 +25,10 @@ fn send_message(message: UciMessage) {
 }
 
 fn send_info(result: &ContextSearchResult) {
+    let tt_filledness =
+        result.result.transposition_table_entries
+        * 1000
+        / result.result.transposition_table_size;
     send_message(UciMessage::Info(vec![
         match result.result.value.kind() {
             EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
@@ -34,7 +38,8 @@ fn send_info(result: &ContextSearchResult) {
         UciInfoAttribute::Depth(result.result.depth as u8),
         UciInfoAttribute::Nodes(result.total_nodes_searched as u64),
         UciInfoAttribute::Pv(result.result.principal_variation.clone()),
-        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(result.total_search_duration).unwrap())
+        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(result.total_search_duration).unwrap()),
+        UciInfoAttribute::HashFull(tt_filledness as u16)
     ]));
 }
 
