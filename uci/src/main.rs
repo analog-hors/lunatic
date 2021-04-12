@@ -10,7 +10,7 @@ use lunatic::*;
 use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
 use lunatic::engine::SearchOptions;
 use lunatic::oracle::Oracle;
-use lunatic::time::{FixedTimeManager, PercentageTimeManager, TimeManager};
+use lunatic::time::{FixedTimeManager, StandardTimeManager, TimeManager};
 use indexmap::IndexMap;
 
 struct EngineSearch {
@@ -213,15 +213,20 @@ fn main() {
                                     Color::White => white_time,
                                     Color::Black => black_time
                                 }.unwrap().to_std().unwrap();
-                                Box::new(PercentageTimeManager::new(
+                                Box::new(StandardTimeManager::new(
                                     time_left, 
                                     options.percent_time_used_per_move,
                                     options.minimum_time_used_per_move
                                 ))
                             }
                             Some(UciTimeControl::Ponder) => todo!(),
-                            None | Some(UciTimeControl::Infinite) => Box::new(
+                            None => Box::new(
                                 FixedTimeManager::new(Duration::from_secs(5))
+                            ),
+                            Some(UciTimeControl::Infinite) => Box::new(
+                                FixedTimeManager::new(
+                                    Duration::new(u64::MAX, 999_999_999)
+                                )
                             )
                         };
                         
