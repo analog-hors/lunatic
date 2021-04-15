@@ -301,7 +301,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                     let child_value = -self.search_position::<PositionEvaluation>(
                         &child_board,
                         node_count,
-                        depth.saturating_sub(self.options.null_move_reduction),
+                        depth.saturating_sub(self.options.null_move_reduction + 1),
                         ply_index + 1,
                         halfmove_clock + 1,
                         -beta,
@@ -330,7 +330,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 };
                 let mut reduced_depth = depth;
                 let mut narrowed_beta = beta;
-                if i as u8 > self.options.late_move_leeway && depth > 3 &&
+                if i as u8 >= self.options.late_move_leeway && depth > 3 &&
                    quiet && !in_check && !gives_check {
                     reduced_depth = if self.options.late_move_reduction < depth {
                         depth - self.options.late_move_reduction

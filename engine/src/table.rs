@@ -56,7 +56,7 @@ impl TranspositionTable {
         let mask = self.0.len() - 1;
         let old = &mut self.0[hash as usize & mask];
         if let Some(old) = old {
-            if old.1.depth < entry.depth {
+            if entry.depth >= old.1.depth {
                 *old = (hash, entry);
             }
         } else {
