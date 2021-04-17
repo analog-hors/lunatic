@@ -297,6 +297,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             //If I have at least one sliding piece...
             if self.options.null_move_pruning && ally_pieces & sliding_pieces != EMPTY {
                 if let Some(child_board) = board.null_move() {
+                    let narrowed_alpha = beta - Evaluation::from_centipawns(1);
                     self.history.push(child_board.get_hash());
                     let child_value = -self.search_position::<PositionEvaluation>(
                         &child_board,
@@ -305,12 +306,12 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                         ply_index + 1,
                         halfmove_clock + 1,
                         -beta,
-                        -alpha,
+                        -narrowed_alpha,
                         terminator
                     )?;
                     self.history.pop();
                     if child_value >= beta {
-                        return Ok(T::convert(|| beta, None));
+                        return Ok(T::convert(|| child_value, None));
                     }
                 }
             }
