@@ -56,10 +56,13 @@ impl TranspositionTable {
         let mask = self.0.len() - 1;
         let old = &mut self.0[hash as usize & mask];
         if let Some(old) = old {
-            if entry.depth >= old.1.depth {
+            if old.0 == hash || entry.depth > old.1.depth {
+                //Matching hashes uses the newer entry since it has more information.
+                //Otherwise, select the deeper entry.
                 *old = (hash, entry);
             }
         } else {
+            //Insert to empty slot
             self.1 += 1;
             *old = Some((hash, entry));
         }
