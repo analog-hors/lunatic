@@ -238,19 +238,19 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         mut beta: Evaluation,
         terminator: &Arc<AtomicBool>
     ) -> Result<T::Output, ()> {
-        if terminator.load(Ordering::Acquire) {
+        if !T::REQUIRES_MOVE && terminator.load(Ordering::Acquire) {
             return Err(());
         }
 
         *node_count += 1;
 
-        if draw_by_move_rule(board, &self.history, halfmove_clock) {
+        if !T::REQUIRES_MOVE && draw_by_move_rule(board, &self.history, halfmove_clock) {
             return Ok(T::convert(|| Evaluation::DRAW, None));
         }
 
         let original_alpha = alpha;
         let terminal_node = board.status() != BoardStatus::Ongoing;
-        if !terminal_node && !T::REQUIRES_MOVE {
+        if !T::REQUIRES_MOVE && !terminal_node {
             if let Some(eval) = self.oracle.eval(board) {
                 return Ok(T::convert(|| eval, None));
             }

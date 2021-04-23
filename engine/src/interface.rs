@@ -85,15 +85,8 @@ impl LunaticContext {
                     board = board.make_move_new(mv);
                     history.push(board.get_hash());
                 }
-                //Deduplicate to feed into engine
-                let mut game_history = Vec::new();
-                for (i, hash) in history.iter().enumerate() {
-                    if i + 1 == history.len() || !history[i+1..].contains(hash) {
-                        game_history.push(*hash);
-                    }
-                }
                 
-                let halfmove_clock = game_history.len() as u8;
+                let halfmove_clock = history.len() as u8;
                 
                 let mut search = LunaticSearchState::new(
                     &board,
