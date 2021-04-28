@@ -20,6 +20,8 @@ pub struct SearchResult {
     pub transposition_table_entries: usize
 }
 
+pub type HistoryTable = [[[u32; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS];
+
 pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
 pub struct LunaticSearchState<'s, E> {
     board: Board,
@@ -31,7 +33,8 @@ pub struct LunaticSearchState<'s, E> {
     transposition_table: TranspositionTable,
     killer_table: Vec<KillerTableEntry>,
     current_depth: u8,
-    max_depth: u8
+    max_depth: u8,
+    history_table: HistoryTable,
 }
 
 pub(crate) fn move_resets_fifty_move_rule(mv: ChessMove, board: &Board) -> bool {
@@ -161,7 +164,8 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             transposition_table: TranspositionTable::with_rounded_size(transposition_table_size),
             killer_table: vec![KillerTableEntry::new(); max_depth as usize],
             current_depth: 0,
-            max_depth
+            max_depth,
+            history_table: [[[0; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS]
         }
     }
 
@@ -315,12 +319,14 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                     }
                 }
             }
-            for (i, mv) in SortedMoveGenerator::new(
+            let mut moves = SortedMoveGenerator::new(
                 &self.transposition_table,
                 self.evaluator,
                 killers, 
                 *board
-            ).enumerate() {
+            );
+            let mut index = 0;
+            while let Some(mv) = moves.next(&self.history_table) {
                 let child_board = board.make_move_new(mv);
                 let quiet = move_is_quiet(&board, &child_board);
                 let gives_check = *child_board.checkers() != EMPTY;
@@ -331,7 +337,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 };
                 let mut reduced_depth = depth;
                 let mut narrowed_beta = beta;
-                if i as u8 >= self.options.late_move_leeway && depth > 3 &&
+                if index as u8 >= self.options.late_move_leeway && depth > 3 &&
                    quiet && !in_check && !gives_check {
                     reduced_depth = if self.options.late_move_reduction < depth {
                         depth - self.options.late_move_reduction
@@ -374,9 +380,15 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                         let entry = &mut self.killer_table[ply_index as usize];
                         entry.retain(|&m| m != mv);
                         entry.push_back(mv);
+                        self.history_table
+                            [board.side_to_move().to_index()]
+                            [board.piece_on(mv.get_source()).unwrap().to_index()]
+                            [mv.get_dest().to_index()]
+                            += depth as u32 * depth as u32;
                     }
                     break;
                 }
+                index += 1;
             }
             let best_move = best_move.unwrap();
             self.transposition_table.set(

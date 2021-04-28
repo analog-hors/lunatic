@@ -6,7 +6,7 @@ use chess::*;
 
 use crate::evaluation::*;
 use crate::table::*;
-use crate::engine::KillerTableEntry;
+use crate::engine::{HistoryTable, KillerTableEntry};
 
 struct MaxSelectionSorter<I>(Vec<I>);
 
@@ -140,13 +140,30 @@ pub struct SortedMoveGenerator<'s, E> {
     pv_move: Option<ChessMove>,
     captures: Option<Peekable<MaxSelectionSorter<SeeMove>>>,
     killers: KillerTableEntry,
+    quiets: Option<Vec<ChessMove>>,
     moves: MoveGen
 }
 
-impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
-    type Item = ChessMove;
+impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
+    pub fn new(
+        table: &TranspositionTable,
+        evaluator: &'s E,
+        killers: KillerTableEntry,
+        board: Board
+    ) -> Self {
+        let pv_move = table.get(&board).map(|entry| entry.best_move);
+        Self {
+            evaluator,
+            board,
+            pv_move,
+            captures: None,
+            killers,
+            quiets: None,
+            moves: MoveGen::new_legal(&board)
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn next(&mut self, history_table: &HistoryTable) -> Option<ChessMove> {
         if let Some(mv) = self.pv_move.take() {
             self.moves.remove_move(mv);
             self.killers.retain(|&m| m != mv);
@@ -195,32 +212,29 @@ impl<E: Evaluator> Iterator for SortedMoveGenerator<'_, E> {
             }
         }
 
-        if let Some(mv) = self.moves.next() {
+        if self.quiets.is_none() {
+            self.quiets = Some((&mut self.moves).collect());
+        }
+        let quiets = self.quiets.as_mut().unwrap();
+        if !quiets.is_empty() {
             //Quiet move
-            return Some(mv);
+            let board = &self.board;
+            let index = quiets
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, mv)| {
+                    history_table
+                        [board.side_to_move().to_index()]
+                        [board.piece_on(mv.get_source()).unwrap().to_index()]
+                        [mv.get_dest().to_index()]
+                })
+                .unwrap()
+                .0;
+            return Some(quiets.swap_remove(index));
         }
 
         //Losing capture
         captures.next().map(|mv| mv.mv)
-    }
-}
-
-impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
-    pub fn new(
-        table: &TranspositionTable,
-        evaluator: &'s E,
-        killers: KillerTableEntry,
-        board: Board
-    ) -> Self {
-        let pv_move = table.get(&board).map(|entry| entry.best_move);
-        Self {
-            evaluator,
-            board,
-            pv_move,
-            captures: None,
-            killers,
-            moves: MoveGen::new_legal(&board)
-        }
     }
 }
 
