@@ -27,99 +27,170 @@ impl PieceSquareTable {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PieceEvalSet<T> {
+    pub pawn: T,
+    pub knight: T,
+    pub bishop: T,
+    pub rook: T,
+    pub queen: T,
+    pub king: T
+}
+
+impl<T> PieceEvalSet<T> {
+    pub fn get(&self, piece: Piece) -> &T {
+        match piece {
+            Piece::Pawn => &self.pawn,
+            Piece::Knight => &self.knight,
+            Piece::Bishop => &self.bishop,
+            Piece::Rook => &self.rook,
+            Piece::Queen => &self.queen,
+            Piece::King => &self.king
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardEvaluator {
-    pub pawn: i32,
-    pub pawn_table: PieceSquareTable,
-    pub knight: i32,
-    pub knight_table: PieceSquareTable,
-    pub bishop: i32,
-    pub bishop_table: PieceSquareTable,
-    pub rook: i32,
-    pub rook_table: PieceSquareTable,
-    pub queen: i32,
-    pub queen_table: PieceSquareTable,
-    pub king_table: PieceSquareTable,
-    pub king_table_endgame: PieceSquareTable
+    pub piece_values: PieceEvalSet<i32>,
+    pub midgame_piece_tables: PieceEvalSet<PieceSquareTable>,
+    pub endgame_piece_tables: PieceEvalSet<PieceSquareTable>
 }
 
 impl Default for StandardEvaluator {
     fn default() -> Self {
         Self {
-            pawn: 100,
-            pawn_table: PieceSquareTable([
-                [  0,   0,   0,   0,   0,   0,   0,   0],
-                [ 50,  50,  50,  50,  50,  50,  50,  50],
-                [ 10,  10,  20,  30,  30,  20,  10,  10],
-                [  5,   5,  10,  25,  25,  10,   5,   5],
-                [  0,   0,   0,  20,  20,   0,   0,   0],
-                [  5,  -5, -10,   0,   0, -10,  -5,   5],
-                [  5,  10,  10, -20, -20,  10,  10,   5],
-                [  0,   0,   0,   0,   0,   0,   0,   0]
-            ]),
-            knight: 320,
-            knight_table: PieceSquareTable([
-                [-50, -40, -30, -30, -30, -30, -40, -50],
-                [-40, -20,   0,   0,   0,   0, -20, -40],
-                [-30,   0,  10,  15,  15,  10,   0, -30],
-                [-30,   5,  15,  20,  20,  15,   5, -30],
-                [-30,   0,  15,  20,  20,  15,   0, -30],
-                [-30,   5,  10,  15,  15,  10,   5, -30],
-                [-40, -20,   0,   5,   5,   0, -20, -40],
-                [-50, -40, -30, -30, -30, -30, -40, -50]
-            ]),
-            bishop: 330,
-            bishop_table: PieceSquareTable([
-                [-20, -10, -10, -10, -10, -10, -10, -20],
-                [-10,   0,   0,   0,   0,   0,   0, -10],
-                [-10,   0,   5,  10,  10,   5,   0, -10],
-                [-10,   5,   5,  10,  10,   5,   5, -10],
-                [-10,   0,  10,  10,  10,  10,   0, -10],
-                [-10,  10,  10,  10,  10,  10,  10, -10],
-                [-10,   5,   0,   0,   0,   0,   5, -10],
-                [-20, -10, -10, -10, -10, -10, -10, -20]
-            ]),
-            rook: 500,
-            rook_table: PieceSquareTable([
-                [  0,   0,   0,   0,   0,   0,   0,   0],
-                [  5,  10,  10,  10,  10,  10,  10,   5],
-                [ -5,   0,   0,   0,   0,   0,   0,  -5],
-                [ -5,   0,   0,   0,   0,   0,   0,  -5],
-                [ -5,   0,   0,   0,   0,   0,   0,  -5],
-                [ -5,   0,   0,   0,   0,   0,   0,  -5],
-                [ -5,   0,   0,   0,   0,   0,   0,  -5],
-                [  0,   0,   0,   5,   5,   0,   0,   0]
-            ]),
-            queen: 900,
-            queen_table: PieceSquareTable([
-                [-20, -10, -10,  -5,  -5, -10, -10, -20],
-                [-10,   0,   0,   0,   0,   0,   0, -10],
-                [-10,   0,   5,   5,   5,   5,   0, -10],
-                [ -5,   0,   5,   5,   5,   5,   0,  -5],
-                [  0,   0,   5,   5,   5,   5,   0,  -5],
-                [-10,   5,   5,   5,   5,   5,   0, -10],
-                [-10,   0,   5,   0,   0,   0,   0, -10],
-                [-20, -10, -10,  -5,  -5, -10, -10, -20]
-            ]),
-            king_table: PieceSquareTable([
-                [-30, -40, -40, -50, -50, -40, -40, -30],
-                [-30, -40, -40, -50, -50, -40, -40, -30],
-                [-30, -40, -40, -50, -50, -40, -40, -30],
-                [-30, -40, -40, -50, -50, -40, -40, -30],
-                [-20, -30, -30, -40, -40, -30, -30, -20],
-                [-10, -20, -20, -20, -20, -20, -20, -10],
-                [ 20,  20,   0,   0,   0,   0,  20,  20],
-                [ 20,  30,  10,   0,   0,  10,  30,  20]
-            ]),
-            king_table_endgame: PieceSquareTable([
-                [-50, -40, -30, -20, -20, -30, -40, -50],
-                [-30, -20, -10,   0,   0, -10, -20, -30],
-                [-30, -10,  20,  30,  30,  20, -10, -30],
-                [-30, -10,  30,  40,  40,  30, -10, -30],
-                [-30, -10,  30,  40,  40,  30, -10, -30],
-                [-30, -10,  20,  30,  30,  20, -10, -30],
-                [-30, -30,   0,   0,   0,   0, -30, -30],
-                [-50, -30, -30, -30, -30, -30, -30, -50]
-            ])
+            piece_values: PieceEvalSet {
+                pawn: 100,
+                knight: 320,
+                bishop: 330,
+                rook: 500,
+                queen: 900,
+                king: 0
+            },
+            midgame_piece_tables: PieceEvalSet {
+                pawn: PieceSquareTable([
+                    [  0,   0,   0,   0,   0,   0,   0,   0],
+                    [ 50,  50,  50,  50,  50,  50,  50,  50],
+                    [ 10,  10,  20,  30,  30,  20,  10,  10],
+                    [  5,   5,  10,  25,  25,  10,   5,   5],
+                    [  0,   0,   0,  20,  20,   0,   0,   0],
+                    [  5,  -5, -10,   0,   0, -10,  -5,   5],
+                    [  5,  10,  10, -20, -20,  10,  10,   5],
+                    [  0,   0,   0,   0,   0,   0,   0,   0]
+                ]),
+                knight: PieceSquareTable([
+                    [-50, -40, -30, -30, -30, -30, -40, -50],
+                    [-40, -20,   0,   0,   0,   0, -20, -40],
+                    [-30,   0,  10,  15,  15,  10,   0, -30],
+                    [-30,   5,  15,  20,  20,  15,   5, -30],
+                    [-30,   0,  15,  20,  20,  15,   0, -30],
+                    [-30,   5,  10,  15,  15,  10,   5, -30],
+                    [-40, -20,   0,   5,   5,   0, -20, -40],
+                    [-50, -40, -30, -30, -30, -30, -40, -50]
+                ]),
+                bishop: PieceSquareTable([
+                    [-20, -10, -10, -10, -10, -10, -10, -20],
+                    [-10,   0,   0,   0,   0,   0,   0, -10],
+                    [-10,   0,   5,  10,  10,   5,   0, -10],
+                    [-10,   5,   5,  10,  10,   5,   5, -10],
+                    [-10,   0,  10,  10,  10,  10,   0, -10],
+                    [-10,  10,  10,  10,  10,  10,  10, -10],
+                    [-10,   5,   0,   0,   0,   0,   5, -10],
+                    [-20, -10, -10, -10, -10, -10, -10, -20]
+                ]),
+                rook: PieceSquareTable([
+                    [  0,   0,   0,   0,   0,   0,   0,   0],
+                    [  5,  10,  10,  10,  10,  10,  10,   5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [  0,   0,   0,   5,   5,   0,   0,   0]
+                ]),
+                queen: PieceSquareTable([
+                    [-20, -10, -10,  -5,  -5, -10, -10, -20],
+                    [-10,   0,   0,   0,   0,   0,   0, -10],
+                    [-10,   0,   5,   5,   5,   5,   0, -10],
+                    [ -5,   0,   5,   5,   5,   5,   0,  -5],
+                    [  0,   0,   5,   5,   5,   5,   0,  -5],
+                    [-10,   5,   5,   5,   5,   5,   0, -10],
+                    [-10,   0,   5,   0,   0,   0,   0, -10],
+                    [-20, -10, -10,  -5,  -5, -10, -10, -20]
+                ]),
+                king: PieceSquareTable([
+                    [-50, -40, -30, -20, -20, -30, -40, -50],
+                    [-30, -20, -10,   0,   0, -10, -20, -30],
+                    [-30, -10,  20,  30,  30,  20, -10, -30],
+                    [-30, -10,  30,  40,  40,  30, -10, -30],
+                    [-30, -10,  30,  40,  40,  30, -10, -30],
+                    [-30, -10,  20,  30,  30,  20, -10, -30],
+                    [-30, -30,   0,   0,   0,   0, -30, -30],
+                    [-50, -30, -30, -30, -30, -30, -30, -50]
+                ])
+            },
+            endgame_piece_tables: PieceEvalSet {
+                pawn: PieceSquareTable([
+                    [  0,   0,   0,   0,   0,   0,   0,   0],
+                    [ 50,  50,  50,  50,  50,  50,  50,  50],
+                    [ 10,  10,  20,  30,  30,  20,  10,  10],
+                    [  5,   5,  10,  25,  25,  10,   5,   5],
+                    [  0,   0,   0,  20,  20,   0,   0,   0],
+                    [  5,  -5, -10,   0,   0, -10,  -5,   5],
+                    [  5,  10,  10, -20, -20,  10,  10,   5],
+                    [  0,   0,   0,   0,   0,   0,   0,   0]
+                ]),
+                knight: PieceSquareTable([
+                    [-50, -40, -30, -30, -30, -30, -40, -50],
+                    [-40, -20,   0,   0,   0,   0, -20, -40],
+                    [-30,   0,  10,  15,  15,  10,   0, -30],
+                    [-30,   5,  15,  20,  20,  15,   5, -30],
+                    [-30,   0,  15,  20,  20,  15,   0, -30],
+                    [-30,   5,  10,  15,  15,  10,   5, -30],
+                    [-40, -20,   0,   5,   5,   0, -20, -40],
+                    [-50, -40, -30, -30, -30, -30, -40, -50]
+                ]),
+                bishop: PieceSquareTable([
+                    [-20, -10, -10, -10, -10, -10, -10, -20],
+                    [-10,   0,   0,   0,   0,   0,   0, -10],
+                    [-10,   0,   5,  10,  10,   5,   0, -10],
+                    [-10,   5,   5,  10,  10,   5,   5, -10],
+                    [-10,   0,  10,  10,  10,  10,   0, -10],
+                    [-10,  10,  10,  10,  10,  10,  10, -10],
+                    [-10,   5,   0,   0,   0,   0,   5, -10],
+                    [-20, -10, -10, -10, -10, -10, -10, -20]
+                ]),
+                rook: PieceSquareTable([
+                    [  0,   0,   0,   0,   0,   0,   0,   0],
+                    [  5,  10,  10,  10,  10,  10,  10,   5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [ -5,   0,   0,   0,   0,   0,   0,  -5],
+                    [  0,   0,   0,   5,   5,   0,   0,   0]
+                ]),
+                queen: PieceSquareTable([
+                    [-20, -10, -10,  -5,  -5, -10, -10, -20],
+                    [-10,   0,   0,   0,   0,   0,   0, -10],
+                    [-10,   0,   5,   5,   5,   5,   0, -10],
+                    [ -5,   0,   5,   5,   5,   5,   0,  -5],
+                    [  0,   0,   5,   5,   5,   5,   0,  -5],
+                    [-10,   5,   5,   5,   5,   5,   0, -10],
+                    [-10,   0,   5,   0,   0,   0,   0, -10],
+                    [-20, -10, -10,  -5,  -5, -10, -10, -20]
+                ]),
+                king: PieceSquareTable([
+                    [-50, -40, -30, -20, -20, -30, -40, -50],
+                    [-30, -20, -10,   0,   0, -10, -20, -30],
+                    [-30, -10,  20,  30,  30,  20, -10, -30],
+                    [-30, -10,  30,  40,  40,  30, -10, -30],
+                    [-30, -10,  30,  40,  40,  30, -10, -30],
+                    [-30, -10,  20,  30,  30,  20, -10, -30],
+                    [-30, -30,   0,   0,   0,   0, -30, -30],
+                    [-50, -30, -30, -30, -30, -30, -30, -50]
+                ])
+            }
         }
     }
 }
@@ -143,14 +214,7 @@ impl Evaluator for StandardEvaluator {
     }
 
     fn piece_value(&self, piece: Piece) -> Evaluation {
-        Evaluation::from_centipawns(match piece {
-            Piece::Pawn => self.pawn,
-            Piece::Knight => self.knight,
-            Piece::Bishop => self.bishop,
-            Piece::Rook => self.rook,
-            Piece::Queen => self.queen,
-            Piece::King => 0
-        })
+        Evaluation::from_centipawns(*self.piece_values.get(piece))
     }
 }
 
@@ -176,28 +240,27 @@ impl StandardEvaluator {
 
     fn evaluate_for_side(&self, board: &Board, side: Color, phase: u32) -> i32 {
         let mut value = 0;
+        let mut midgame_value = 0;
+        let mut endgame_value = 0;
         let ally_pieces = *board.color_combined(side);
 
         for &piece in &ALL_PIECES {
             let pieces = ally_pieces & *board.pieces(piece);
+            let piece_value = *self.piece_values.get(piece);
+            let midgame_piece_table = self.midgame_piece_tables.get(piece);
+            let endgame_piece_table = self.endgame_piece_tables.get(piece);
+
+            value += pieces.popcnt() as i32 * piece_value;
             for square in pieces {
-                value += match piece {
-                    Piece::Pawn => self.pawn + self.pawn_table.get(side, square),
-                    Piece::Knight => self.knight + self.knight_table.get(side, square),
-                    Piece::Bishop => self.bishop + self.bishop_table.get(side, square),
-                    Piece::Rook => self.rook + self.rook_table.get(side, square),
-                    Piece::Queen => self.queen + self.queen_table.get(side, square),
-                    Piece::King => {
-                        let init = self.king_table.get(side, square);
-                        let endgame = self.king_table_endgame.get(side, square);
-                        let phase = phase as i32;
-                        const MAX_PHASE: i32 = StandardEvaluator::MAX_PHASE as i32;
-                        ((init * (MAX_PHASE - phase)) + (endgame * phase)) / MAX_PHASE
-                    }
-                };
+                midgame_value += midgame_piece_table.get(side, square);
+                endgame_value += endgame_piece_table.get(side, square);
             }
         }
-        
-        value
+
+        midgame_value += value;
+        endgame_value += value;
+        let phase = phase as i32;
+        const MAX_PHASE: i32 = StandardEvaluator::MAX_PHASE as i32;
+        (((midgame_value) * (MAX_PHASE - phase)) + ((endgame_value) * phase)) / MAX_PHASE
     }
 }
