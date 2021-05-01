@@ -145,7 +145,7 @@ fn main() {
         }
         UciOptionConfig::Spin {
             name: "Minimum time used per move (ms)".to_owned(),
-            default: Some(options.minimum_time_used_per_move.as_secs() as i64),
+            default: Some(options.minimum_time_used_per_move.as_millis() as i64),
             min: Some(0),
             max: Some(u32::MAX as i64)
         } => |options, value| {
@@ -153,7 +153,7 @@ fn main() {
                 .parse()
                 .unwrap();
             options.minimum_time_used_per_move =
-                Duration::from_secs(time);
+                Duration::from_millis(time);
         }
     }
 
