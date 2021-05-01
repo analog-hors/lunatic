@@ -276,6 +276,8 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         if depth == 0 || terminal_node {
             Ok(T::convert(
                 || {
+                    //Prevent double counting
+                    *node_count -= 1;
                     self.quiescence_search(
                         board,
                         node_count,
