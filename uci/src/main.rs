@@ -260,11 +260,13 @@ async fn main() {
                             black_time,
                             ..
                         }) => {
-                            let time_left = match position
-                                .as_ref()
-                                .unwrap()
-                                .0
-                                .side_to_move() {
+                            let (initial_pos, moves) = position.as_ref().unwrap();
+                            let side_to_move = if moves.len() % 2 == 0 {
+                                initial_pos.side_to_move()
+                            } else {
+                                !initial_pos.side_to_move()
+                            };
+                            let time_left = match side_to_move {
                                 Color::White => white_time,
                                 Color::Black => black_time
                             }.unwrap().to_std().unwrap();
