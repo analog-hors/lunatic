@@ -2,8 +2,7 @@
 
 members = [
     "engine",
-    "uci",
-    "lichess"
+    "uci"
 ]
 
 [profile.release]
