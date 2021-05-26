@@ -198,7 +198,7 @@ async fn main() {
             name: "Minimum time used per move (ms)".to_owned(),
             default: Some(options.minimum_time_used_per_move.as_millis() as i64),
             min: Some(0),
-            max: Some(u32::MAX as i64)
+            max: Some(1000 * 60 * 60 * 24)
         } => |options, value| {
             let time = value
                 .parse()
