@@ -437,18 +437,18 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             }
         }
 
-        //The reason we are allowed to safely return the alpha score
+        //The reason we are allowed to safely return this score
         //is the assumption that even though we only check captures,
         //at any point in the search there is at least one other
         //move that matches or is better than the value, so we didn't
         //*necessarily* have to play this line and it's *probably* at
         //least that value.
-        let stand_pat = self.evaluator.evaluate(board, ply_index);
-        if stand_pat > beta {
-            return beta;
-        }
-        if alpha < stand_pat {
-            alpha = stand_pat;
+        let mut value = self.evaluator.evaluate(board, ply_index);
+        if value > alpha {
+            alpha = value;
+            if alpha >= beta {
+                return value;
+            }
         }
         for mv in quiescence_move_generator(self.evaluator, &board) {
             let child_board = board.make_move_new(mv);
@@ -467,11 +467,16 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 -alpha
             );
             self.history.pop();
-            if child_value >= beta {
-                return beta;
+            if child_value > value {
+                value = child_value;
+                if value > alpha {
+                    alpha = value;
+                    if alpha >= beta {
+                        return value;
+                    }
+                }
             }
-            alpha = alpha.max(child_value);
         }
-        alpha
+        value
     }
 }
