@@ -28,15 +28,10 @@ impl Oracle {
                 }
             }
             4 => {
-                let edges =
-                    get_rank(Rank::First) |
-                    get_rank(Rank::Eighth) |
-                    get_file(File::A) |
-                    get_file(File::H);
                 //KNvKN KNNvk. Always a draw except for a few positions that are mate in one.
                 //All of those positions have a king on an edge and are incredibly rare,
                 //so we just do a quick check for edge kings before returning a draw.
-                if knights.popcnt() == 2 && (kings & edges) == EMPTY {
+                if knights.popcnt() == 2 && (kings & EDGES) == EMPTY {
                     return Some(Evaluation::DRAW);
                 }
                 None
