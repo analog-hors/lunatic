@@ -4,7 +4,7 @@ use chess::*;
 use crate::evaluation::{Evaluation, Evaluator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PieceSquareTable(pub [[i32; 8]; 8]);
+pub struct PieceSquareTable(pub [[i16; 8]; 8]);
 
 impl PieceSquareTable {
     fn key(side: chess::Color, square: chess::Square) -> (usize, usize) {
@@ -15,12 +15,12 @@ impl PieceSquareTable {
         (rank, square.get_file().to_index())
     }
     
-    pub fn get(&self, side: chess::Color, square: chess::Square) -> i32 {
+    pub fn get(&self, side: chess::Color, square: chess::Square) -> i16 {
         let (rank, file) = Self::key(side, square);
         self.0[rank][file]
     }
 
-    pub fn set(&mut self, side: chess::Color, square: chess::Square, value: i32) {
+    pub fn set(&mut self, side: chess::Color, square: chess::Square, value: i16) {
         let (rank, file) = Self::key(side, square);
         self.0[rank][file] = value;
     }
@@ -51,7 +51,7 @@ impl<T> PieceEvalSet<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardEvaluator {
-    pub piece_values: PieceEvalSet<i32>,
+    pub piece_values: PieceEvalSet<i16>,
     pub midgame_piece_tables: PieceEvalSet<PieceSquareTable>,
     pub endgame_piece_tables: PieceEvalSet<PieceSquareTable>
 }
@@ -238,7 +238,7 @@ impl StandardEvaluator {
         }
     }
 
-    fn evaluate_for_side(&self, board: &Board, side: Color, phase: u32) -> i32 {
+    fn evaluate_for_side(&self, board: &Board, side: Color, phase: u32) -> i16 {
         let mut value = 0;
         let mut midgame_value = 0;
         let mut endgame_value = 0;
@@ -250,7 +250,7 @@ impl StandardEvaluator {
             let midgame_piece_table = self.midgame_piece_tables.get(piece);
             let endgame_piece_table = self.endgame_piece_tables.get(piece);
 
-            value += pieces.popcnt() as i32 * piece_value;
+            value += pieces.popcnt() as i16 * piece_value;
             for square in pieces {
                 midgame_value += midgame_piece_table.get(side, square);
                 endgame_value += endgame_piece_table.get(side, square);
@@ -261,6 +261,10 @@ impl StandardEvaluator {
         endgame_value += value;
         let phase = phase as i32;
         const MAX_PHASE: i32 = StandardEvaluator::MAX_PHASE as i32;
-        (((midgame_value) * (MAX_PHASE - phase)) + ((endgame_value) * phase)) / MAX_PHASE
+        let interpolated = (
+            (midgame_value as i32 * (MAX_PHASE - phase)) +
+            (endgame_value as i32 * phase)
+        ) / MAX_PHASE;
+        interpolated as i16
     }
 }

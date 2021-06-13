@@ -4,11 +4,11 @@ pub use standard::*;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Evaluation(i32);
+pub struct Evaluation(i16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvaluationKind {
-    Centipawn(i32),
+    Centipawn(i16),
     MateIn(u8),
     MatedIn(u8)
 }
@@ -37,14 +37,14 @@ impl Display for EvaluationKind {
 impl Evaluation {
     pub const DRAW: Self = Self(0);
 
-    pub const INFINITY: Self = Self(i32::MAX);
+    pub const INFINITY: Self = Self(i16::MAX);
 
-    pub const fn from_centipawns(centipawns: i32) -> Self {
+    pub const fn from_centipawns(centipawns: i16) -> Self {
         Self(centipawns)
     }
 
     pub const fn mate_in(plies_to_mate: u8) -> Self {
-        Self(i32::MAX - plies_to_mate as i32)
+        Self(i16::MAX - plies_to_mate as i16)
     }
 
     pub const fn mated_in(plies_to_mate: u8) -> Self {
@@ -52,10 +52,10 @@ impl Evaluation {
     }
 
     pub const fn kind(self) -> EvaluationKind {
-        const MAX_MATE_IN: i32 = Evaluation::mate_in(u8::MAX).0;
-        const MIN_MATE_IN: i32 = Evaluation::mate_in(u8::MIN).0;
-        const MAX_MATED_IN: i32 = Evaluation::mated_in(u8::MAX).0;
-        const MIN_MATED_IN: i32 = Evaluation::mated_in(u8::MIN).0;
+        const MAX_MATE_IN: i16 = Evaluation::mate_in(u8::MAX).0;
+        const MIN_MATE_IN: i16 = Evaluation::mate_in(u8::MIN).0;
+        const MAX_MATED_IN: i16 = Evaluation::mated_in(u8::MAX).0;
+        const MIN_MATED_IN: i16 = Evaluation::mated_in(u8::MIN).0;
         
         match self.0 {
             v if v >= MAX_MATE_IN => EvaluationKind::MateIn((MIN_MATE_IN - v) as u8),

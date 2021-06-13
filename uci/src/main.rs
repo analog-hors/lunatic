@@ -331,7 +331,7 @@ async fn main() {
                         / result.result.transposition_table_size;
                     send_message(UciMessage::Info(vec![
                         match result.result.value.kind() {
-                            EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp),
+                            EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp as i32),
                             EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
                             EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
                         },
