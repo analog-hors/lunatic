@@ -4,7 +4,7 @@ use std::iter::Peekable;
 use arrayvec::ArrayVec;
 use chess::*;
 
-use crate::evaluation::*;
+use crate::evaluator::*;
 use crate::table::*;
 use crate::engine::{HistoryTable, KillerTableEntry};
 
@@ -52,7 +52,7 @@ impl Ord for SeeMove {
     }
 }
 
-fn static_exchange_evaluation(evaluator: &impl Evaluator, board: &Board, capture: ChessMove) -> Evaluation {
+fn static_exchange_evaluation(board: &Board, capture: ChessMove) -> Evaluation {
     let color = board.side_to_move();
     let sq = capture.get_dest();
 
@@ -79,7 +79,7 @@ fn static_exchange_evaluation(evaluator: &impl Evaluator, board: &Board, capture
     //...I don't really want to figure out the exact value.
     let mut gains = ArrayVec::<[Evaluation; 32]>::new();
     let mut side_to_move = color;
-    let mut square_piece_value = evaluator.piece_value(board.piece_on(sq).unwrap());
+    let mut square_piece_value = EVALUATOR.piece_value(board.piece_on(sq).unwrap());
     let mut attacker_square = capture.get_source();
     loop {
         //Reverse the roles if our piece is being attacked.
@@ -108,7 +108,7 @@ fn static_exchange_evaluation(evaluator: &impl Evaluator, board: &Board, capture
         gains.push(-previous_score + square_piece_value);
 
         //Now our attacker is on that square.
-        square_piece_value = evaluator.piece_value(attacker);
+        square_piece_value = EVALUATOR.piece_value(attacker);
         side_to_move = !side_to_move;
         if *defenders == EMPTY {
             //No one is left to defend.
@@ -134,8 +134,7 @@ fn static_exchange_evaluation(evaluator: &impl Evaluator, board: &Board, capture
     }
 }
 
-pub struct SortedMoveGenerator<'s, E> {
-    evaluator: &'s E,
+pub struct SortedMoveGenerator {
     board: Board,
     pv_move: Option<ChessMove>,
     captures: Option<Peekable<MaxSelectionSorter<SeeMove>>>,
@@ -144,16 +143,14 @@ pub struct SortedMoveGenerator<'s, E> {
     moves: MoveGen
 }
 
-impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
+impl SortedMoveGenerator {
     pub fn new(
         table: &TranspositionTable,
-        evaluator: &'s E,
         killers: KillerTableEntry,
         board: Board
     ) -> Self {
         let pv_move = table.get(&board).map(|entry| entry.best_move);
         Self {
-            evaluator,
             board,
             pv_move,
             captures: None,
@@ -178,7 +175,6 @@ impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
                 //same move is not quiet as it is a different position
                 self.killers.retain(|&m| m != mv);
                 let value = static_exchange_evaluation(
-                    self.evaluator,
                     &self.board,
                     mv
                 );
@@ -238,7 +234,7 @@ impl<'s, E: Evaluator> SortedMoveGenerator<'s, E> {
     }
 }
 
-pub fn quiescence_move_generator(evaluator: &impl Evaluator, board: &Board) -> impl Iterator<Item=ChessMove> {
+pub fn quiescence_move_generator(board: &Board) -> impl Iterator<Item=ChessMove> {
     //Chess branching factor is ~35
     let mut see_moves = Vec::with_capacity(40);
     let mut captures = MoveGen::new_legal(board);
@@ -246,7 +242,6 @@ pub fn quiescence_move_generator(evaluator: &impl Evaluator, board: &Board) -> i
     captures.set_iterator_mask(*board.combined());
     for mv in captures {
         let value = static_exchange_evaluation(
-            evaluator,
             board,
             mv
         );

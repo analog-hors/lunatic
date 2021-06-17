@@ -1,13 +1,15 @@
 use chess::*;
 use arraydeque::ArrayDeque;
 use serde::{Serialize, Deserialize};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
-use crate::evaluation::{Evaluation, Evaluator};
-use crate::oracle::Oracle;
+use crate::evaluator::*;
 use crate::table::*;
 use crate::moves::*;
+use crate::oracle;
+
+pub type HistoryTable = [[[u32; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS];
+
+pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -20,21 +22,21 @@ pub struct SearchResult {
     pub transposition_table_entries: usize
 }
 
-pub type HistoryTable = [[[u32; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS];
+pub trait LunaticHandler {
+    fn time_up(&mut self) -> bool;
 
-pub(crate) type KillerTableEntry = ArrayDeque<[ChessMove; 2], arraydeque::Wrapping>;
-pub struct LunaticSearchState<'s, E> {
+    fn search_result(&mut self, search_result: SearchResult);
+}
+
+pub struct LunaticSearchState<H> {
+    handler: H,
     board: Board,
-    evaluator: &'s E,
     history: Vec<u64>,
     halfmove_clock: u8,
-    options: &'s SearchOptions,
-    oracle: &'s Oracle,
-    transposition_table: TranspositionTable,
+    options: SearchOptions,
+    cache_table: TranspositionTable,
     killer_table: Vec<KillerTableEntry>,
-    current_depth: u8,
-    max_depth: u8,
-    history_table: HistoryTable,
+    history_table: HistoryTable
 }
 
 pub(crate) fn move_resets_fifty_move_rule(mv: ChessMove, board: &Board) -> bool {
@@ -119,7 +121,10 @@ pub struct SearchOptions {
     ///Enable null move pruning?
     pub null_move_pruning: bool,
     ///The number of plies the null move pruning search is reduced by
-    pub null_move_reduction: u8
+    pub null_move_reduction: u8,
+    pub max_depth: u8,
+    pub max_nodes: u32,
+    pub transposition_table_size: usize
 }
 
 impl Default for SearchOptions {
@@ -128,7 +133,10 @@ impl Default for SearchOptions {
             late_move_reduction: 1,
             late_move_leeway: 3,
             null_move_pruning: true,
-            null_move_reduction: 2
+            null_move_reduction: 2,
+            max_depth: 64,
+            max_nodes: u32::MAX,
+            transposition_table_size: 16_000_000
         }
     }
 }
@@ -140,59 +148,55 @@ pub enum SearchError {
     Terminated
 }
 
-impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
+impl<H: LunaticHandler> LunaticSearchState<H> {
     pub fn new(
-        board: &Board,
-        evaluator: &'s E,
-        history: &[u64],
-        halfmove_clock: u8,
-        options: &'s SearchOptions,
-        oracle: &'s Oracle,
-        transposition_table_size: usize,
-        max_depth: u8
+        handler: H,
+        init_pos: &Board,
+        moves: impl IntoIterator<Item=ChessMove>,
+        options: SearchOptions
     ) -> Self {
-        let mut history = history.to_vec();
-        //+ 32 for quiescence search
-        history.reserve_exact(max_depth as usize + 32);
+        //100 for history, +32 for quiescence search
+        let mut history = Vec::with_capacity(100 + options.max_depth as usize + 32);
+        let mut board = *init_pos;
+        history.push(board.get_hash());
+        for mv in moves {
+            if move_resets_fifty_move_rule(mv, &board) {
+                history.clear();
+            }
+            board = board.make_move_new(mv);
+            history.push(board.get_hash());
+        }
+        let halfmove_clock = history.len() as u8;
+
         Self {
-            board: *board,
-            evaluator,
+            handler,
+            board,
             history,
             halfmove_clock,
-            options,
-            oracle,
-            transposition_table: TranspositionTable::with_rounded_size(transposition_table_size),
-            killer_table: vec![KillerTableEntry::new(); max_depth as usize],
-            current_depth: 0,
-            max_depth,
-            history_table: [[[0; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS]
+            cache_table: TranspositionTable::with_rounded_size(options.transposition_table_size),
+            killer_table: vec![KillerTableEntry::new(); options.max_depth as usize],
+            history_table: [[[0; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS],
+            options
         }
     }
 
-    pub fn deepen(&mut self, terminator: &Arc<AtomicBool>) -> Result<SearchResult, SearchError> {
-        if self.current_depth >= self.max_depth {
-            return Err(SearchError::MaxDepth);
-        }
-
+    pub fn search(&mut self) {
         let history_len = self.history.len();
 
         let mut nodes = 0;
-        self.current_depth += 1;
-        let result = self.search_position::<BestMove>(
-            &self.board.clone(),
-            &mut nodes,
-            self.current_depth,
-            0,
-            self.halfmove_clock,
-            -Evaluation::INFINITY,
-            Evaluation::INFINITY,
-            terminator
-        );
-        //Early termination may trash history, so restore the state.
-        self.history.truncate(history_len);
-        
-        match result {
-            Ok(Some((mv, value))) => Ok({
+        for depth in 0..self.options.max_depth {
+            let result = self.search_position::<BestMove>(
+                &self.board.clone(),
+                &mut nodes,
+                depth,
+                0,
+                self.halfmove_clock,
+                -Evaluation::INFINITY,
+                Evaluation::INFINITY
+            );
+            //Early termination may trash history, so restore the state.
+            self.history.truncate(history_len);
+            if let Ok(Some((mv, value))) = result {
                 let mut principal_variation = Vec::new();
                 let mut board = self.board;
                 let mut halfmove_clock = self.halfmove_clock;
@@ -211,23 +215,21 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                     next_move = if draw_by_move_rule(&board, &self.history, halfmove_clock) {
                         None
                     } else {
-                        self.transposition_table.get(&board).map(|e| e.best_move)
+                        self.cache_table.get(&board).map(|e| e.best_move)
                     };
                 }
                 self.history.truncate(history_len);
                 
-                SearchResult {
+                self.handler.search_result(SearchResult {
                     mv,
                     value,
                     nodes,
-                    depth: self.current_depth,
+                    depth,
                     principal_variation,
-                    transposition_table_size: self.transposition_table.capacity(),
-                    transposition_table_entries: self.transposition_table.len(),
-                }
-            }),
-            Ok(None) => Err(SearchError::NoMoves),
-            Err(()) => Err(SearchError::Terminated)
+                    transposition_table_size: self.cache_table.capacity(),
+                    transposition_table_entries: self.cache_table.len(),
+                });
+            }
         }
     }
     
@@ -239,10 +241,9 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         ply_index: u8,
         halfmove_clock: u8,
         mut alpha: Evaluation,
-        mut beta: Evaluation,
-        terminator: &Arc<AtomicBool>
+        mut beta: Evaluation
     ) -> Result<T::Output, ()> {
-        if !T::REQUIRES_MOVE && terminator.load(Ordering::Acquire) {
+        if !T::REQUIRES_MOVE && *node_count % 4096 == 0 && self.handler.time_up() {
             return Err(());
         }
 
@@ -255,12 +256,12 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         let original_alpha = alpha;
         let terminal_node = board.status() != BoardStatus::Ongoing;
         if !T::REQUIRES_MOVE && !terminal_node {
-            if let Some(eval) = self.oracle.eval(board) {
+            if let Some(eval) = oracle::oracle(board) {
                 return Ok(T::convert(|| eval, None));
             }
         }
 
-        if let Some(entry) = self.transposition_table.get(&board) {
+        if let Some(entry) = self.cache_table.get(&board) {
             //Larger subtree means deeper search
             if entry.depth >= depth {
                 match entry.kind {
@@ -312,8 +313,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                         ply_index + 1,
                         halfmove_clock + 1,
                         -beta,
-                        -narrowed_alpha,
-                        terminator
+                        -narrowed_alpha
                     )?;
                     self.history.pop();
                     if child_value >= beta {
@@ -322,8 +322,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 }
             }
             let mut moves = SortedMoveGenerator::new(
-                &self.transposition_table,
-                self.evaluator,
+                &self.cache_table,
                 killers, 
                 *board
             );
@@ -358,8 +357,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                         ply_index + 1,
                         halfmove_clock,
                         -narrowed_beta,
-                        -alpha,
-                        terminator
+                        -alpha
                     )?;
 
                     //If it was searched to a reduced depth and it
@@ -393,7 +391,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
                 index += 1;
             }
             let best_move = best_move.unwrap();
-            self.transposition_table.set(
+            self.cache_table.set(
                 &board,
                 TableEntry {
                     kind: match value {
@@ -425,7 +423,7 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
             return Evaluation::DRAW;
         }
 
-        if let Some(entry) = self.transposition_table.get(&board) {
+        if let Some(entry) = self.cache_table.get(&board) {
             //Literally any hit is better than quiescence search
             match entry.kind {
                 TableEntryKind::Exact => return entry.value,
@@ -443,14 +441,14 @@ impl<'s, E: Evaluator> LunaticSearchState<'s, E> {
         //move that matches or is better than the value, so we didn't
         //*necessarily* have to play this line and it's *probably* at
         //least that value.
-        let mut value = self.evaluator.evaluate(board, ply_index);
+        let mut value = EVALUATOR.evaluate(board, ply_index);
         if value > alpha {
             alpha = value;
             if alpha >= beta {
                 return value;
             }
         }
-        for mv in quiescence_move_generator(self.evaluator, &board) {
+        for mv in quiescence_move_generator(&board) {
             let child_board = board.make_move_new(mv);
             let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
                 1

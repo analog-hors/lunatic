@@ -1,6 +1,6 @@
 use chess::*;
 
-use crate::evaluation::Evaluation;
+use crate::evaluator::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableEntryKind {

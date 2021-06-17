@@ -1,88 +1,61 @@
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write, stdin};
 use std::time::{Instant, Duration};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader, stdin};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chess::*;
 
 use vampirc_uci::{UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
-use lunatic::*;
-use lunatic::evaluation::{StandardEvaluator, EvaluationKind};
-use lunatic::engine::SearchOptions;
-use lunatic::oracle::Oracle;
-use lunatic::time::{FixedTimeManager, StandardTimeManager, TimeManager};
+use lunatic::evaluator::*;
+use lunatic::engine::*;
+use lunatic::time::*;
 use indexmap::IndexMap;
 
-struct EngineSearch {
-    time_manager: Box<dyn TimeManager>,
+struct UciHandler {
+    time_manager: StandardTimeManager,
+    search_begin: Instant,
     last_update: Instant,
     time_left: Duration,
-    search_stream: flume::Receiver<ContextSearchResult>,
-    search_request: SearchRequest,
-    search_terminated: bool,
-    search_result: Option<ContextSearchResult>
+    search_terminator: Arc<AtomicBool>,
+    event_sink: Sender<Event>,
+    prev_result: Option<SearchResult>
+}
+
+impl LunaticHandler for UciHandler {
+    fn time_up(&mut self) -> bool {
+        if self.time_left < self.last_update.elapsed() || self.search_terminator.load(Ordering::Acquire) {
+            self.event_sink.send(
+                Event::EngineSearchUpdate(
+                    EngineSearchResult::SearchFinished(
+                        self.prev_result.take().unwrap()
+                    )
+                )
+            ).unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn search_result(&mut self, result: SearchResult) {
+        self.time_left = self.time_manager.update(result.clone(), self.last_update.elapsed());
+        self.last_update = Instant::now();
+        self.prev_result = Some(result.clone());
+        self.event_sink.send(
+            Event::EngineSearchUpdate(
+                EngineSearchResult::SearchInfo(
+                    result,
+                    self.search_begin.elapsed()
+                )
+            )
+        ).unwrap();
+    }
 }
 
 enum EngineSearchResult {
-    SearchInfo(ContextSearchResult),
-    SearchResult(ContextSearchResult),
-    Finished
-}
-
-impl EngineSearch {
-    pub fn new(
-        time_manager: Box<dyn TimeManager>,
-        search_stream: std::sync::mpsc::Receiver<ContextSearchResult>,
-        search_request: SearchRequest
-    ) -> Self {
-        let (async_search_stream_producer, async_search_stream) =
-            flume::unbounded();
-        std::thread::spawn(move || {
-            while let Ok(result) = search_stream.recv() {
-                async_search_stream_producer.send(result).unwrap();
-            }
-        });
-        Self {
-            time_manager,
-            last_update: Instant::now(),
-            time_left: Duration::new(u64::MAX, 999_999_999),
-            search_stream: async_search_stream,
-            search_request,
-            search_terminated: false,
-            search_result: None
-        }
-    }
-
-    pub async fn poll(&mut self) -> EngineSearchResult {
-        if !self.search_terminated {
-            let message = tokio::time::timeout(self.time_left, self.search_stream.recv_async());
-            if let Ok(Ok(result)) = message.await {
-                self.time_left = self.time_manager.update(
-                    result.result.clone(),
-                    self.last_update.elapsed()
-                );
-                self.last_update = Instant::now();
-                return EngineSearchResult::SearchInfo(result);
-            } else {
-                self.search_result = self.search_request.terminate();
-                self.search_terminated = true;
-            }
-        }
-        if let Ok(result) = self.search_stream.try_recv() {
-            return EngineSearchResult::SearchInfo(result);
-        }
-        if let Some(result) = self.search_result.take() {
-            return EngineSearchResult::SearchResult(result);
-        }
-        EngineSearchResult::Finished
-    }
-
-    pub fn terminate(&mut self) {
-        if !self.search_terminated {
-            self.search_result = self.search_request.terminate();
-            self.search_terminated = true;
-        }
-    }
+    SearchInfo(SearchResult, Duration),
+    SearchFinished(SearchResult)
 }
 
 fn send_message(message: UciMessage) {
@@ -105,9 +78,7 @@ enum Event {
 #[tokio::main]
 async fn main() {
     let mut position: Option<(Board, Vec<ChessMove>)> = None;
-    let settings = LunaticContextSettings::<StandardEvaluator>::default();
-    let engine = LunaticContext::new(settings);
-    let mut search: Option<EngineSearch> = None;
+    let mut search = None;
 
     const MEGABYTE: usize = 1000_000;
     //Use IndexMap to preserve options order
@@ -208,21 +179,18 @@ async fn main() {
         }
     }
 
-    let mut lines = BufReader::new(stdin()).lines();
-    'main: loop {
-        //TODO make this cleaner?
-        let event = if let Some(search) = &mut search {
-            tokio::select! {
-                message = lines.next_line() => {
-                    Event::UciMessage(vampirc_uci::parse_one(&message.unwrap().unwrap()))
-                }
-                update = search.poll() => {
-                    Event::EngineSearchUpdate(update)
-                }
+    let (event_sink, events) = channel();
+    std::thread::spawn({
+        let event_sink = event_sink.clone();
+        move || {
+            let mut lines = BufReader::new(stdin()).lines();
+            while let Some(Ok(line)) = lines.next() {
+                let _ = event_sink.send(Event::UciMessage(vampirc_uci::parse_one(&line)));
             }
-        } else {
-            Event::UciMessage(vampirc_uci::parse_one(&lines.next_line().await.unwrap().unwrap()))
-        };
+        }
+    });
+
+    'main: while let Ok(event) = events.recv() {
         match event {
             Event::UciMessage(message) => match message {
                 UciMessage::Uci => {
@@ -249,11 +217,12 @@ async fn main() {
                     position = Some((board, moves));
                 }
                 UciMessage::Go { time_control, search_control } => {
-                    let time_manager: Box<dyn TimeManager>;
-                    let mut max_depth = 64;
+                    let time_manager;
                     time_manager = match time_control {
-                        Some(UciTimeControl::MoveTime(time)) => Box::new(
-                            FixedTimeManager::new(time.to_std().unwrap())
+                        Some(UciTimeControl::MoveTime(time)) => StandardTimeManager::new(
+                            Duration::from_secs(0),
+                            0.0,
+                            time.to_std().unwrap()
                         ),
                         Some(UciTimeControl::TimeLeft {
                             white_time,
@@ -270,50 +239,49 @@ async fn main() {
                                 Color::White => white_time,
                                 Color::Black => black_time
                             }.unwrap().to_std().unwrap();
-                            Box::new(StandardTimeManager::new(
+                            StandardTimeManager::new(
                                 time_left, 
                                 options.percent_time_used_per_move,
                                 options.minimum_time_used_per_move
-                            ))
+                            )
                         }
                         Some(UciTimeControl::Ponder) => todo!(),
-                        None => Box::new(
-                            FixedTimeManager::new(Duration::from_secs(5))
-                        ),
-                        Some(UciTimeControl::Infinite) => Box::new(
-                            FixedTimeManager::new(
-                                Duration::new(u64::MAX, 999_999_999)
-                            )
+                        None | Some(UciTimeControl::Infinite) => StandardTimeManager::new(
+                            Duration::from_secs(0),
+                            0.0,
+                            Duration::new(u64::MAX, 999_999_999)
                         )
                     };
                     
+                    options.search_options.max_depth = 64;
                     if let Some(search_control) = search_control {
                         if let Some(depth) = search_control.depth {
-                            max_depth = depth;
+                            options.search_options.max_depth = depth;
                         }
                         //TODO implement the rest
                     }
                     let (initial_pos, moves) = position.take().unwrap();
-                    let (search_stream, search_request) =
-                        engine.begin_think(
-                            initial_pos, 
-                            moves,
-                            options.transposition_table_size,
-                            max_depth,
-                            options.search_options.clone(),
-                            Arc::new(Oracle)
-                        );
-
-                    search = Some(
-                        EngineSearch::new(
-                            time_manager,
-                            search_stream,
-                            search_request
-                        )
+                    let terminator = Arc::new(AtomicBool::new(false));
+                    let handler = UciHandler {
+                        time_manager,
+                        search_begin: Instant::now(),
+                        last_update: Instant::now(),
+                        time_left: Duration::new(u64::MAX, 999_999_999),
+                        search_terminator: Arc::clone(&terminator),
+                        event_sink: event_sink.clone(),
+                        prev_result: None,
+                    };
+                    let mut search_state = LunaticSearchState::new(
+                        handler,
+                        &initial_pos,
+                        moves,
+                        options.search_options.clone()
                     );
+                    std::thread::spawn(move || search_state.search());
+                    search = Some(terminator);
                 }
                 UciMessage::Stop => if let Some(search) = &mut search {
-                    search.terminate();
+                    search.store(true, Ordering::Release);
                 },
                 
                 UciMessage::PonderHit => {}
@@ -324,28 +292,28 @@ async fn main() {
                 _ => {}
             }
             Event::EngineSearchUpdate(result) => match result {
-                EngineSearchResult::SearchInfo(result) => {
+                EngineSearchResult::SearchInfo(result, duration) => {
                     let tt_filledness =
-                        result.result.transposition_table_entries
+                        result.transposition_table_entries
                         * 1000
-                        / result.result.transposition_table_size;
+                        / result.transposition_table_size;
                     send_message(UciMessage::Info(vec![
-                        match result.result.value.kind() {
+                        match result.value.kind() {
                             EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp as i32),
                             EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
                             EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
                         },
-                        UciInfoAttribute::Depth(result.result.depth as u8),
-                        UciInfoAttribute::Nodes(result.total_nodes_searched as u64),
-                        UciInfoAttribute::Pv(result.result.principal_variation.clone()),
-                        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(result.total_search_duration).unwrap()),
+                        UciInfoAttribute::Depth(result.depth as u8),
+                        UciInfoAttribute::Nodes(result.nodes as u64),
+                        UciInfoAttribute::Pv(result.principal_variation.clone()),
+                        UciInfoAttribute::Time(vampirc_uci::Duration::from_std(duration).unwrap()),
                         UciInfoAttribute::HashFull(tt_filledness as u16)
                     ]));
                 }
-                EngineSearchResult::SearchResult(result) => {
-                    send_message(UciMessage::best_move(result.result.mv));
+                EngineSearchResult::SearchFinished(result) => {
+                    send_message(UciMessage::best_move(result.mv));
+                    search = None;
                 }
-                EngineSearchResult::Finished => search = None
             }
         }
     }

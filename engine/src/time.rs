@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use crate::SearchResult;
-use crate::evaluation::*;
+use crate::engine::SearchResult;
+use crate::evaluator::*;
 
 pub trait TimeManager {
     ///Update the time manager's internal state with a new result.
