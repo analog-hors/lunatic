@@ -75,8 +75,7 @@ enum Event {
     EngineSearchUpdate(EngineSearchResult)
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let mut position: Option<(Board, Vec<ChessMove>)> = None;
     let mut search = None;
 
@@ -88,7 +87,7 @@ async fn main() {
         transposition_table_size: 4 * MEGABYTE,
         search_options: SearchOptions::default(),
         percent_time_used_per_move: 0.05f32,
-        minimum_time_used_per_move: Duration::from_millis(0)
+        minimum_time_used_per_move: Duration::ZERO
     };
     macro_rules! add_handlers {
         ($($option:expr => $handler:expr)*) => {
@@ -220,7 +219,7 @@ async fn main() {
                     let time_manager;
                     time_manager = match time_control {
                         Some(UciTimeControl::MoveTime(time)) => StandardTimeManager::new(
-                            Duration::from_secs(0),
+                            Duration::ZERO,
                             0.0,
                             time.to_std().unwrap()
                         ),
@@ -247,9 +246,9 @@ async fn main() {
                         }
                         Some(UciTimeControl::Ponder) => todo!(),
                         None | Some(UciTimeControl::Infinite) => StandardTimeManager::new(
-                            Duration::from_secs(0),
+                            Duration::ZERO,
                             0.0,
-                            Duration::new(u64::MAX, 999_999_999)
+                            Duration::MAX
                         )
                     };
                     
@@ -266,7 +265,7 @@ async fn main() {
                         time_manager,
                         search_begin: Instant::now(),
                         last_update: Instant::now(),
-                        time_left: Duration::new(u64::MAX, 999_999_999),
+                        time_left: Duration::MAX,
                         search_terminator: Arc::clone(&terminator),
                         event_sink: event_sink.clone(),
                         prev_result: None,
