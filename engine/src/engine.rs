@@ -196,39 +196,43 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
             );
             //Early termination may trash history, so restore the state.
             self.history.truncate(history_len);
-            if let Ok(Some((mv, value))) = result {
-                let mut principal_variation = Vec::new();
-                let mut board = self.board;
-                let mut halfmove_clock = self.halfmove_clock;
-
-                let mut next_move = Some(mv);
-                while let Some(mv) = next_move.take() {
-                    halfmove_clock = if move_resets_fifty_move_rule(mv, &board) {
-                        1
-                    } else {
-                        halfmove_clock + 1
-                    };
-                    board = board.make_move_new(mv);
-                    principal_variation.push(mv);
-                    self.history.push(board.get_hash());
-
-                    next_move = if draw_by_move_rule(&board, &self.history, halfmove_clock) {
-                        None
-                    } else {
-                        self.cache_table.get(&board).map(|e| e.best_move)
-                    };
-                }
-                self.history.truncate(history_len);
-                
-                self.handler.search_result(SearchResult {
-                    mv,
-                    value,
-                    nodes,
-                    depth,
-                    principal_variation,
-                    transposition_table_size: self.cache_table.capacity(),
-                    transposition_table_entries: self.cache_table.len(),
-                });
+            match result {
+                Ok(Some((mv, value))) => {
+                    let mut principal_variation = Vec::new();
+                    let mut board = self.board;
+                    let mut halfmove_clock = self.halfmove_clock;
+    
+                    let mut next_move = Some(mv);
+                    while let Some(mv) = next_move.take() {
+                        halfmove_clock = if move_resets_fifty_move_rule(mv, &board) {
+                            1
+                        } else {
+                            halfmove_clock + 1
+                        };
+                        board = board.make_move_new(mv);
+                        principal_variation.push(mv);
+                        self.history.push(board.get_hash());
+    
+                        next_move = if draw_by_move_rule(&board, &self.history, halfmove_clock) {
+                            None
+                        } else {
+                            self.cache_table.get(&board).map(|e| e.best_move)
+                        };
+                    }
+                    self.history.truncate(history_len);
+                    
+                    self.handler.search_result(SearchResult {
+                        mv,
+                        value,
+                        nodes,
+                        depth,
+                        principal_variation,
+                        transposition_table_size: self.cache_table.capacity(),
+                        transposition_table_entries: self.cache_table.len(),
+                    });
+                },
+                Ok(None) => {},
+                Err(()) => break //Terminated
             }
         }
     }
