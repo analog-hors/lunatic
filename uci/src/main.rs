@@ -22,20 +22,10 @@ struct UciHandler {
     prev_result: Option<SearchResult>
 }
 
-impl LunaticHandler for UciHandler {
+impl LunaticHandler for &mut UciHandler {
     fn time_up(&mut self) -> bool {
-        if self.time_left < self.last_update.elapsed() || self.search_terminator.load(Ordering::Acquire) {
-            self.event_sink.send(
-                Event::EngineSearchUpdate(
-                    EngineSearchResult::SearchFinished(
-                        self.prev_result.take().unwrap()
-                    )
-                )
-            ).unwrap();
-            true
-        } else {
-            false
-        }
+        self.time_left < self.last_update.elapsed() ||
+        self.search_terminator.load(Ordering::Acquire)
     }
 
     fn search_result(&mut self, result: SearchResult) {
@@ -47,6 +37,18 @@ impl LunaticHandler for UciHandler {
                 EngineSearchResult::SearchInfo(
                     result,
                     self.search_begin.elapsed()
+                )
+            )
+        ).unwrap();
+    }
+}
+
+impl UciHandler {
+    fn finish(mut self) {
+        self.event_sink.send(
+            Event::EngineSearchUpdate(
+                EngineSearchResult::SearchFinished(
+                    self.prev_result.take().unwrap()
                 )
             )
         ).unwrap();
@@ -261,7 +263,7 @@ fn main() {
                     }
                     let (initial_pos, moves) = position.take().unwrap();
                     let terminator = Arc::new(AtomicBool::new(false));
-                    let handler = UciHandler {
+                    let mut handler = UciHandler {
                         time_manager,
                         search_begin: Instant::now(),
                         last_update: Instant::now(),
@@ -270,13 +272,19 @@ fn main() {
                         event_sink: event_sink.clone(),
                         prev_result: None,
                     };
-                    let mut search_state = LunaticSearchState::new(
-                        handler,
-                        &initial_pos,
-                        moves,
-                        options.search_options.clone()
-                    );
-                    std::thread::spawn(move || search_state.search());
+                    std::thread::spawn({
+                        let options = options.search_options.clone();
+                        move || {
+                            let mut search_state = LunaticSearchState::new(
+                                &mut handler,
+                                &initial_pos,
+                                moves,
+                                options
+                            );
+                            search_state.search();
+                            handler.finish();
+                        }
+                    });
                     search = Some(terminator);
                 }
                 UciMessage::Stop => if let Some(search) = &mut search {
