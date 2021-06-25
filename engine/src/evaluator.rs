@@ -175,13 +175,9 @@ impl StandardEvaluator {
         match board.status() {
             BoardStatus::Ongoing => {
                 let phase = Self::game_phase(&board);
-                let white = self.evaluate_for_side(board, chess::Color::White, phase);
-                let black = self.evaluate_for_side(board, chess::Color::Black, phase);
-                Evaluation::from_centipawns(if board.side_to_move() == Color::White {
-                    white - black
-                } else {
-                    black - white
-                })
+                let us = self.evaluate_for_side(board, board.side_to_move(), phase);
+                let them = self.evaluate_for_side(board, !board.side_to_move(), phase);
+                Evaluation::from_centipawns(us - them)
             },
             BoardStatus::Checkmate => Evaluation::mated_in(ply_index),
             BoardStatus::Stalemate => Evaluation::DRAW
