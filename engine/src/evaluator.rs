@@ -171,17 +171,11 @@ impl Default for StandardEvaluator {
 }
 
 impl StandardEvaluator {
-    pub fn evaluate(&self, board: &Board, ply_index: u8) -> Evaluation {
-        match board.status() {
-            BoardStatus::Ongoing => {
-                let phase = Self::game_phase(&board);
-                let us = self.evaluate_for_side(board, board.side_to_move(), phase);
-                let them = self.evaluate_for_side(board, !board.side_to_move(), phase);
-                Evaluation::from_centipawns(us - them)
-            },
-            BoardStatus::Checkmate => Evaluation::mated_in(ply_index),
-            BoardStatus::Stalemate => Evaluation::DRAW
-        }
+    pub fn evaluate(&self, board: &Board) -> Evaluation {
+        let phase = Self::game_phase(&board);
+        let us = self.evaluate_for_side(board, board.side_to_move(), phase);
+        let them = self.evaluate_for_side(board, !board.side_to_move(), phase);
+        Evaluation::from_centipawns(us - them)
     }
 
     pub fn piece_value(&self, piece: Piece) -> Evaluation {

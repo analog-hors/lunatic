@@ -147,7 +147,8 @@ impl SortedMoveGenerator {
     pub fn new(
         table: &TranspositionTable,
         killers: KillerTableEntry,
-        board: Board
+        board: Board,
+        moves: MoveGen
     ) -> Self {
         let pv_move = table.get(&board).map(|entry| entry.best_move);
         Self {
@@ -156,7 +157,7 @@ impl SortedMoveGenerator {
             captures: None,
             killers,
             quiets: None,
-            moves: MoveGen::new_legal(&board)
+            moves
         }
     }
 
@@ -234,13 +235,12 @@ impl SortedMoveGenerator {
     }
 }
 
-pub fn quiescence_move_generator(board: &Board) -> impl Iterator<Item=ChessMove> {
+pub fn quiescence_move_generator(board: &Board, mut moves: MoveGen) -> impl Iterator<Item=ChessMove> {
     //Chess branching factor is ~35
     let mut see_moves = Vec::with_capacity(40);
-    let mut captures = MoveGen::new_legal(board);
     //TODO excludes en-passant, does this matter?
-    captures.set_iterator_mask(*board.combined());
-    for mv in captures {
+    moves.set_iterator_mask(*board.combined());
+    for mv in moves {
         let value = static_exchange_evaluation(
             board,
             mv

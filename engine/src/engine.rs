@@ -52,6 +52,16 @@ pub(crate) fn move_is_quiet(board: &Board, child_board: &Board) -> bool {
     child_board.pieces(Piece::Pawn).popcnt() == board.pieces(Piece::Pawn).popcnt()
 }
 
+fn board_status(board: &Board, moves: &MoveGen) -> BoardStatus {
+    if moves.len() > 0 {
+        BoardStatus::Ongoing
+    } else if *board.checkers() != EMPTY {
+        BoardStatus::Checkmate
+    } else {
+        BoardStatus::Stalemate
+    }
+}
+
 fn draw_by_move_rule(board: &Board, game_history: &[u64], halfmove_clock: u8) -> bool {
     //Fifty move rule
     if halfmove_clock >= 100 {
@@ -258,8 +268,18 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
         }
 
         let original_alpha = alpha;
-        let terminal_node = board.status() != BoardStatus::Ongoing;
-        if !T::REQUIRES_MOVE && !terminal_node {
+        let moves = MoveGen::new_legal(&board);
+        let status = board_status(board, &moves);
+        if status != BoardStatus::Ongoing {
+            let eval = if status == BoardStatus::Checkmate {
+                Evaluation::mated_in(ply_index)
+            } else {
+                Evaluation::DRAW
+            };
+            return Ok(T::convert(|| eval, None));
+        }
+
+        if !T::REQUIRES_MOVE {
             if let Some(eval) = oracle::oracle(board) {
                 return Ok(T::convert(|| eval, None));
             }
@@ -278,7 +298,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
                 }
             }
         }
-        if depth == 0 || terminal_node {
+        if depth == 0 {
             Ok(T::convert(
                 || {
                     //Prevent double counting
@@ -328,7 +348,8 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
             let mut moves = SortedMoveGenerator::new(
                 &self.cache_table,
                 killers, 
-                *board
+                *board,
+                moves
             );
             let mut index = 0;
             while let Some(mv) = moves.next(&self.history_table) {
@@ -445,16 +466,22 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
         //move that matches or is better than the value, so we didn't
         //*necessarily* have to play this line and it's *probably* at
         //least that value.
-        let mut value = EVALUATOR.evaluate(board, ply_index);
+        let moves = MoveGen::new_legal(&board);
+        match board_status(board, &moves) {
+            BoardStatus::Checkmate => return Evaluation::mated_in(ply_index),
+            BoardStatus::Stalemate => return Evaluation::DRAW,
+            _ => {}
+        }
+        let mut value = EVALUATOR.evaluate(board);
         if value > alpha {
             alpha = value;
             if alpha >= beta {
                 return value;
             }
         }
-        for mv in quiescence_move_generator(&board) {
+        for mv in quiescence_move_generator(&board, moves) {
             let child_board = board.make_move_new(mv);
-            let depth_since_zeroing = if move_resets_fifty_move_rule(mv, board) {
+            let halfmove_clock = if move_resets_fifty_move_rule(mv, board) {
                 1
             } else {
                 halfmove_clock + 1
@@ -464,7 +491,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
                 &child_board,
                 node_count,
                 ply_index + 1,
-                depth_since_zeroing,
+                halfmove_clock,
                 -beta,
                 -alpha
             );
