@@ -6,7 +6,7 @@ use chess::*;
 
 use crate::evaluator::*;
 use crate::table::*;
-use crate::engine::{HistoryTable, KillerTableEntry};
+use crate::search::{HistoryTable, KillerTableEntry};
 
 struct MaxSelectionSorter<I>(Vec<I>);
 
@@ -36,7 +36,7 @@ impl<I: Ord> ExactSizeIterator for MaxSelectionSorter<I> {}
 //TODO consider still using MVV-LVA for LxH captures as it's cheaper?
 #[derive(Debug, PartialEq, Eq)]
 struct SeeMove {
-    value: Evaluation,
+    value: Eval,
     mv: ChessMove
 }
 
@@ -52,7 +52,7 @@ impl Ord for SeeMove {
     }
 }
 
-fn static_exchange_evaluation(board: &Board, capture: ChessMove) -> Evaluation {
+fn static_exchange_evaluation(board: &Board, capture: ChessMove) -> Eval {
     let color = board.side_to_move();
     let sq = capture.get_dest();
 
@@ -77,7 +77,7 @@ fn static_exchange_evaluation(board: &Board, capture: ChessMove) -> Evaluation {
 
     //A piece can be attacked at most 15 times, about double that accounting for defending it.
     //...I don't really want to figure out the exact value.
-    let mut gains = ArrayVec::<[Evaluation; 32]>::new();
+    let mut gains = ArrayVec::<[Eval; 32]>::new();
     let mut side_to_move = color;
     let mut square_piece_value = EVALUATOR.piece_value(board.piece_on(sq).unwrap());
     let mut attacker_square = capture.get_source();
@@ -191,7 +191,7 @@ impl SortedMoveGenerator {
         
         if let Some(mv) = captures.peek() {
             //Wininng or equal capture
-            if mv.value >= Evaluation::from_centipawns(0) {
+            if mv.value >= Eval::cp(0) {
                 let mv = mv.mv;
                 captures.next();
                 return Some(mv);

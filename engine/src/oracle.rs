@@ -2,7 +2,7 @@ use chess::*;
 
 use crate::evaluator::*;
 
-pub fn oracle(board: &Board) -> Option<Evaluation> {
+pub fn oracle(board: &Board) -> Option<Eval> {
     let all_pieces = *board.combined();
     let white_pieces = *board.color_combined(Color::White);
     let bishops = *board.pieces(Piece::Bishop);
@@ -11,11 +11,11 @@ pub fn oracle(board: &Board) -> Option<Evaluation> {
 
     match all_pieces.popcnt() {
         0 | 1 => unreachable!(),
-        2 => Some(Evaluation::DRAW),
+        2 => Some(Eval::DRAW),
         3 => {
             //KBvK and KNvK is always a draw
             if bishops | knights != EMPTY {
-                Some(Evaluation::DRAW)
+                Some(Eval::DRAW)
             } else {
                 None
             }
@@ -37,23 +37,23 @@ pub fn oracle(board: &Board) -> Option<Evaluation> {
             //All of those positions have a king on an edge and are incredibly rare,
             //so we just do a quick check for edge kings before returning a draw.
             if knights.popcnt() == 2 && (kings & EDGES) == EMPTY {
-                return Some(Evaluation::DRAW);
+                return Some(Eval::DRAW);
             }
             if bishops.popcnt() == 2 {
                 if (bishops & dark_squares()).popcnt() != 1 {
                     //Both bishops are on the same color square
-                    return Some(Evaluation::DRAW);
+                    return Some(Eval::DRAW);
                 }
                 if one_piece_each && (kings & CORNERS) == EMPTY {
                     //Opposite color bishops. Check the corners
                     //since there's technically one checkmate.
-                    return Some(Evaluation::DRAW);
+                    return Some(Eval::DRAW);
                 }
             }
             if knights.popcnt() == 1 && bishops.popcnt() == 1 {
                 if one_piece_each && (kings & CORNERS) == EMPTY {
                     //Check the corners since there's technically one checkmate.
-                    return Some(Evaluation::DRAW);
+                    return Some(Eval::DRAW);
                 }
             }
             None

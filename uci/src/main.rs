@@ -8,7 +8,7 @@ use chess::*;
 
 use vampirc_uci::{UciInfoAttribute, UciMessage, UciOptionConfig, UciTimeControl};
 use lunatic::evaluator::*;
-use lunatic::engine::*;
+use lunatic::search::*;
 use lunatic::time::*;
 use indexmap::IndexMap;
 
@@ -306,9 +306,9 @@ fn main() {
                         / result.transposition_table_size;
                     send_message(UciMessage::Info(vec![
                         match result.value.kind() {
-                            EvaluationKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp as i32),
-                            EvaluationKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
-                            EvaluationKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
+                            EvalKind::Centipawn(cp) => UciInfoAttribute::from_centipawns(cp as i32),
+                            EvalKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
+                            EvalKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
                         },
                         UciInfoAttribute::Depth(result.depth as u8),
                         UciInfoAttribute::Nodes(result.nodes as u64),

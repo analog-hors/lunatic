@@ -4,42 +4,46 @@ use serde::{Serialize, Deserialize};
 use chess::*;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Evaluation(i16);
+pub struct Eval(i16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EvaluationKind {
+pub enum EvalKind {
     Centipawn(i16),
     MateIn(u8),
     MatedIn(u8)
 }
 
-impl Display for Evaluation {
+impl Display for Eval {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.kind().fmt(f)
     }
 }
 
-impl Display for EvaluationKind {
+impl Display for EvalKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match *self {
-            EvaluationKind::Centipawn(cp) => {
+            EvalKind::Centipawn(cp) => {
                 if cp < 0 {
                     write!(f, "-")?;
                 }
                 write!(f, "{}.{}", cp.abs() / 100, cp.abs() % 100)
             },
-            EvaluationKind::MateIn(m) => write!(f, "M{}", (m + 1) / 2),
-            EvaluationKind::MatedIn(m) => write!(f, "-M{}", (m + 1) / 2)
+            EvalKind::MateIn(m) => write!(f, "M{}", (m + 1) / 2),
+            EvalKind::MatedIn(m) => write!(f, "-M{}", (m + 1) / 2)
         }
     }
 }
 
-impl Evaluation {
-    pub const DRAW: Self = Self(0);
+impl Eval {
+    pub const ZERO: Self = Self(0);
 
-    pub const INFINITY: Self = Self(i16::MAX);
+    pub const DRAW: Self = Self::ZERO;
 
-    pub const fn from_centipawns(centipawns: i16) -> Self {
+    pub const MAX: Self = Self(i16::MAX);
+
+    pub const MIN: Self = Self(-Self::MAX.0);
+
+    pub const fn cp(centipawns: i16) -> Self {
         Self(centipawns)
     }
 
@@ -51,16 +55,16 @@ impl Evaluation {
         Self(-Self::mate_in(plies_to_mate).0)
     }
 
-    pub const fn kind(self) -> EvaluationKind {
-        const MAX_MATE_IN: i16 = Evaluation::mate_in(u8::MAX).0;
-        const MIN_MATE_IN: i16 = Evaluation::mate_in(u8::MIN).0;
-        const MAX_MATED_IN: i16 = Evaluation::mated_in(u8::MAX).0;
-        const MIN_MATED_IN: i16 = Evaluation::mated_in(u8::MIN).0;
+    pub const fn kind(self) -> EvalKind {
+        const MAX_MATE_IN: i16 = Eval::mate_in(u8::MAX).0;
+        const MIN_MATE_IN: i16 = Eval::mate_in(u8::MIN).0;
+        const MAX_MATED_IN: i16 = Eval::mated_in(u8::MAX).0;
+        const MIN_MATED_IN: i16 = Eval::mated_in(u8::MIN).0;
         
         match self.0 {
-            v if v >= MAX_MATE_IN => EvaluationKind::MateIn((MIN_MATE_IN - v) as u8),
-            v if v <= MAX_MATED_IN => EvaluationKind::MatedIn((v - MIN_MATED_IN) as u8),
-            v => EvaluationKind::Centipawn(v),
+            v if v >= MAX_MATE_IN => EvalKind::MateIn((MIN_MATE_IN - v) as u8),
+            v if v <= MAX_MATED_IN => EvalKind::MatedIn((v - MIN_MATED_IN) as u8),
+            v => EvalKind::Centipawn(v),
         }
     }
 }
@@ -68,7 +72,7 @@ impl Evaluation {
 macro_rules! impl_math_ops {
     ($($trait:ident,$fn:ident,$op:tt;)*) => {
         $(
-            impl std::ops::$trait for Evaluation {
+            impl std::ops::$trait for Eval {
                 type Output = Self;
     
                 fn $fn(self, other: Self) -> Self::Output {
@@ -88,7 +92,7 @@ impl_math_ops! {
 macro_rules! impl_math_assign_ops {
     ($($trait:ident,$fn:ident,$op:tt;)*) => {
         $(
-            impl std::ops::$trait for Evaluation {
+            impl std::ops::$trait for Eval {
                 fn $fn(&mut self, other: Self) {
                     self.0 $op other.0;
                 }
@@ -103,7 +107,7 @@ impl_math_assign_ops! {
     DivAssign, div_assign, /=;
 }
 
-impl std::ops::Neg for Evaluation {
+impl std::ops::Neg for Eval {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -115,20 +119,20 @@ impl std::ops::Neg for Evaluation {
 pub struct PieceSquareTable(pub [[i16; 8]; 8]);
 
 impl PieceSquareTable {
-    fn key(side: chess::Color, square: chess::Square) -> (usize, usize) {
+    fn key(side: Color, square: Square) -> (usize, usize) {
         let mut rank = square.get_rank().to_index();
-        if side == chess::Color::White {
+        if side == Color::White {
             rank = 7 - rank;
         }
         (rank, square.get_file().to_index())
     }
     
-    pub fn get(&self, side: chess::Color, square: chess::Square) -> i16 {
+    pub fn get(&self, side: Color, square: Square) -> i16 {
         let (rank, file) = Self::key(side, square);
         self.0[rank][file]
     }
 
-    pub fn set(&mut self, side: chess::Color, square: chess::Square, value: i16) {
+    pub fn set(&mut self, side: Color, square: Square, value: i16) {
         let (rank, file) = Self::key(side, square);
         self.0[rank][file] = value;
     }
@@ -171,15 +175,15 @@ impl Default for StandardEvaluator {
 }
 
 impl StandardEvaluator {
-    pub fn evaluate(&self, board: &Board) -> Evaluation {
+    pub fn evaluate(&self, board: &Board) -> Eval {
         let phase = Self::game_phase(&board);
         let us = self.evaluate_for_side(board, board.side_to_move(), phase);
         let them = self.evaluate_for_side(board, !board.side_to_move(), phase);
-        Evaluation::from_centipawns(us - them)
+        Eval::cp(us - them)
     }
 
-    pub fn piece_value(&self, piece: Piece) -> Evaluation {
-        Evaluation::from_centipawns(*self.piece_values.get(piece))
+    pub fn piece_value(&self, piece: Piece) -> Eval {
+        Eval::cp(*self.piece_values.get(piece))
     }
 }
 

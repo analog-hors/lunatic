@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::engine::SearchResult;
+use crate::search::SearchResult;
 use crate::evaluator::*;
 
 pub trait TimeManager {
@@ -21,7 +21,7 @@ impl FixedTimeManager {
     pub fn new(interval: Duration) -> Self {
         Self {
             interval,
-            elapsed: Duration::from_secs(0)
+            elapsed: Duration::ZERO
         }
     }
 }
@@ -32,7 +32,7 @@ impl TimeManager for FixedTimeManager {
         if self.interval > self.elapsed {
             self.interval - self.elapsed
         } else {
-            Duration::from_secs(0)
+            Duration::ZERO
         }
     }
 }
@@ -63,11 +63,11 @@ impl StandardTimeManager {
 
 impl TimeManager for StandardTimeManager {
     fn update(&mut self, result: SearchResult, time: Duration) -> Duration {
-        if let EvaluationKind::Centipawn(_) = result.value.kind() {
+        if let EvalKind::Centipawn(_) = result.value.kind() {
             self.0.update(result, time)
         } else {
             //Forced outcome, cut thinking short
-            Duration::from_secs(0)
+            Duration::ZERO
         }
     }
 }

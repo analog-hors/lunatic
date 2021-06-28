@@ -12,7 +12,7 @@ pub enum TableEntryKind {
 #[derive(Debug, Copy, Clone)]
 pub struct TableEntry {
     pub kind: TableEntryKind,
-    pub value: Evaluation,
+    pub value: Eval,
     ///Remaining depth to max depth (the size of the subtree)
     pub depth: u8,
     pub best_move: ChessMove
