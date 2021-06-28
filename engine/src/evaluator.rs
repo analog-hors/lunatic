@@ -193,8 +193,9 @@ impl StandardEvaluator {
     fn game_phase(board: &Board) -> u32 {
         macro_rules! game_phase_fn {
             ($($piece:ident=$weight:expr,$count:expr;)*) => {
-                const INIT_PHASE: u32 = ($($count * $weight + )* 0) * 2;
-                let phase = INIT_PHASE $( - board.pieces(Piece::$piece).popcnt() * $weight)*;
+                const INIT_PHASE: u32 = (0 $( + $count * $weight)*) * 2;
+                let inv_phase = 0 $( + board.pieces(Piece::$piece).popcnt() * $weight)*;
+                let phase = INIT_PHASE.saturating_sub(inv_phase); //Early promotions
                 (phase * Self::MAX_PHASE + (INIT_PHASE / 2)) / INIT_PHASE
             }
         }
