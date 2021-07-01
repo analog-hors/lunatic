@@ -152,7 +152,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
         &mut self,
         board: &Board,
         node_count: &mut u32,
-        depth: u8,
+        mut depth: u8,
         ply_index: u8,
         halfmove_clock: u8,
         mut alpha: Eval,
@@ -185,6 +185,13 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
             if let Some(eval) = oracle::oracle(board) {
                 return Ok(T::convert(|| eval, None));
             }
+        }
+
+        let in_check = *board.checkers() != EMPTY;
+        if in_check {
+            //Check extensions.
+            //Don't enter quiescence while in check.
+            depth += 1;
         }
 
         if let Some(entry) = self.cache_table.get(&board) {
@@ -222,7 +229,6 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
         let mut value = Eval::MIN;
         let mut best_move = None;
         let killers = self.killer_table[ply_index as usize].clone();
-        let in_check = *board.checkers() != EMPTY;
         let ally_pieces = *board.color_combined(board.side_to_move());
         let sliding_pieces = 
             *board.pieces(Piece::Rook) |
