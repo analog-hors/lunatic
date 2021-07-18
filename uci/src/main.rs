@@ -12,6 +12,8 @@ use lunatic::search::*;
 use lunatic::time::*;
 use indexmap::IndexMap;
 
+mod bench;
+
 struct UciHandler {
     time_manager: StandardTimeManager,
     search_begin: Instant,
@@ -78,6 +80,11 @@ enum Event {
 }
 
 fn main() {
+    if std::env::args().skip(1).next().as_deref() == Some("bench") {
+        bench::bench();
+        return;
+    }
+    
     let mut position: Option<(Board, Vec<ChessMove>)> = None;
     let mut search = None;
 
