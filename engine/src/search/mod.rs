@@ -77,7 +77,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
             board = board.make_move_new(mv);
             history.push(board.get_hash());
         }
-        let halfmove_clock = history.len() as u8;
+        let halfmove_clock = history.len() as u8 - 1;
 
         Self {
             handler,
