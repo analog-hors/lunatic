@@ -18,8 +18,10 @@ pub struct TableEntry {
     pub best_move: ChessMove
 }
 
+type FullTableEntry = Option<(u64, TableEntry)>;
+
 #[derive(Debug)]
-pub struct TranspositionTable(Vec<Option<(u64, TableEntry)>>, usize);
+pub struct TranspositionTable(Vec<FullTableEntry>, usize);
 
 //TODO consider using `unsafe` to speed up transposition table access by removing bounds checking?
 impl TranspositionTable {
@@ -33,7 +35,7 @@ impl TranspositionTable {
     ///then rounds up the size to the nearest power of two.
     ///`panic` on overflow.
     pub fn with_rounded_size(size: usize) -> Self {
-        Self::with_rounded_entries(size / std::mem::size_of::<TableEntry>())
+        Self::with_rounded_entries(size / std::mem::size_of::<FullTableEntry>())
     }
 
     pub fn get(&self, board: &Board) -> Option<TableEntry> {
