@@ -21,14 +21,24 @@ pub struct TableEntry {
 type FullTableEntry = Option<(u64, TableEntry)>;
 
 #[derive(Debug)]
-pub struct TranspositionTable(Vec<FullTableEntry>, usize);
+pub struct TranspositionTable {
+    table: Box<[FullTableEntry]>,
+    len: usize,
+    mask: usize
+}
 
 //TODO consider using `unsafe` to speed up transposition table access by removing bounds checking?
 impl TranspositionTable {
     ///Rounds up the number of entries to a power of two.
     ///`panic` on overflow.
     pub fn with_rounded_entries(entries: usize) -> Self {
-        Self(vec![None; entries.checked_next_power_of_two().unwrap()], 0)
+        let entries = entries.checked_next_power_of_two().unwrap();
+        let table = vec![None; entries].into_boxed_slice();
+        Self {
+            len: 0,
+            mask: table.len() - 1,
+            table
+        }
     }
 
     ///Converts the size in bytes to an amount of entries
@@ -40,8 +50,7 @@ impl TranspositionTable {
 
     pub fn get(&self, board: &Board) -> Option<TableEntry> {
         let hash = board.get_hash();
-        let mask = self.0.len() - 1;
-        if let Some((entry_hash, entry)) = self.0[hash as usize & mask] {
+        if let Some((entry_hash, entry)) = self.table[hash as usize & self.mask] {
             if entry_hash == hash {
                 return Some(entry);
             }
@@ -55,8 +64,7 @@ impl TranspositionTable {
         entry: TableEntry
     ) {
         let hash = board.get_hash();
-        let mask = self.0.len() - 1;
-        let old = &mut self.0[hash as usize & mask];
+        let old = &mut self.table[hash as usize & self.mask];
         if let Some(old) = old {
             if old.0 == hash || entry.depth > old.1.depth {
                 //Matching hashes uses the newer entry since it has more information.
@@ -65,16 +73,16 @@ impl TranspositionTable {
             }
         } else {
             //Insert to empty slot
-            self.1 += 1;
+            self.len += 1;
             *old = Some((hash, entry));
         }
     }
 
     pub fn capacity(&self) -> usize {
-        self.0.len()
+        self.table.len()
     }
 
     pub fn len(&self) -> usize {
-        self.1
+        self.len
     }
 }
