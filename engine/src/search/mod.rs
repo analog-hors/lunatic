@@ -56,7 +56,8 @@ pub struct LunaticSearchState<H> {
     options: SearchOptions,
     cache_table: TranspositionTable,
     killer_table: Vec<KillerTableEntry>,
-    history_table: HistoryTable
+    history_table: HistoryTable,
+    sel_depth: u8
 }
 
 impl<H: LunaticHandler> LunaticSearchState<H> {
@@ -87,7 +88,8 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
             cache_table: TranspositionTable::with_rounded_size(options.transposition_table_size),
             killer_table: vec![KillerTableEntry::new(); options.max_depth as usize],
             history_table: [[[0; NUM_SQUARES]; NUM_PIECES]; NUM_COLORS],
-            options
+            options,
+            sel_depth: 0
         }
     }
 
@@ -137,6 +139,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
                         value,
                         nodes,
                         depth,
+                        sel_depth: self.sel_depth,
                         principal_variation,
                         transposition_table_size: self.cache_table.capacity(),
                         transposition_table_entries: self.cache_table.len(),
@@ -158,6 +161,7 @@ impl<H: LunaticHandler> LunaticSearchState<H> {
         mut alpha: Eval,
         mut beta: Eval
     ) -> Result<T::Output, ()> {
+        self.sel_depth = self.sel_depth.max(ply_index);
         let original_alpha = alpha;
 
         if !T::REQUIRES_MOVE && *node_count % 4096 == 0 && self.handler.time_up() {

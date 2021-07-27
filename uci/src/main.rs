@@ -317,7 +317,8 @@ fn main() {
                             EvalKind::MateIn(m) => UciInfoAttribute::from_mate(((m + 1) / 2) as i8),
                             EvalKind::MatedIn(m) => UciInfoAttribute::from_mate(-(((m + 1) / 2) as i8))
                         },
-                        UciInfoAttribute::Depth(result.depth as u8),
+                        UciInfoAttribute::Depth(result.depth),
+                        UciInfoAttribute::SelDepth(result.sel_depth),
                         UciInfoAttribute::Nodes(result.nodes as u64),
                         UciInfoAttribute::Pv(result.principal_variation.clone()),
                         UciInfoAttribute::Time(vampirc_uci::Duration::from_std(duration).unwrap()),

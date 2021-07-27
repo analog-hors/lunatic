@@ -25,6 +25,7 @@ pub struct SearchResult {
     pub value: Eval,
     pub nodes: u32,
     pub depth: u8,
+    pub sel_depth: u8,
     pub principal_variation: Vec<ChessMove>,
     pub transposition_table_size: usize,
     pub transposition_table_entries: usize
