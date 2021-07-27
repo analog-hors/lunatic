@@ -24,7 +24,7 @@ struct UciHandler {
     prev_result: Option<SearchResult>
 }
 
-impl LunaticHandler for &mut UciHandler {
+impl LunaticHandler for UciHandler {
     fn time_up(&mut self) -> bool {
         self.time_left < self.last_update.elapsed() ||
         self.search_terminator.load(Ordering::Acquire)

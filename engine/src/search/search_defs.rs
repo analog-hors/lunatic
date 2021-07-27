@@ -9,6 +9,15 @@ pub trait LunaticHandler {
     fn search_result(&mut self, search_result: SearchResult);
 }
 
+impl<H: LunaticHandler, R: std::ops::DerefMut<Target=H>> LunaticHandler for R {
+    fn time_up(&mut self) -> bool {
+        (**self).time_up()
+    }
+
+    fn search_result(&mut self, search_result: SearchResult) {
+        (**self).search_result(search_result)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {

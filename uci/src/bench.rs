@@ -36,7 +36,7 @@ const DEPTH: u8 = 8;
 
 struct BenchHandler(Option<SearchResult>);
 
-impl LunaticHandler for &mut BenchHandler {
+impl LunaticHandler for BenchHandler {
     fn time_up(&mut self) -> bool {
         self.0.as_ref().map(|r| r.depth >= DEPTH).unwrap_or_default()
     }
